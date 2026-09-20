@@ -1,0 +1,18 @@
+{
+  "workspace": {
+    "path": "${workspaceFolder}\\servo_app.eww"
+  },
+  "workspaces": {
+    "${workspaceFolder}\\servo_app.eww": {
+      "configs": {
+        "${workspaceFolder}\\servo_app.ewp": "stm32h743vit6"
+      },
+      "selected": {
+        "path": "${workspaceFolder}\\servo_app.ewp"
+      }
+    }
+  },
+  "workbench": {
+    "path": "C:\\iar\\ewarm-9.70.1"
+  }
+}

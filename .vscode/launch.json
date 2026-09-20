@@ -1,0 +1,44 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        
+        {
+            "name": "STM32: Debug (ST-LINK)",
+            "type": "stlinkgdbtarget",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "STM32：编译（GCC）",
+            "gdb": "C:/Users/chenx/AppData/Local/stm32cube/bundles/gnu-gdb-for-stm32/14.3.1+st.2/bin/arm-none-eabi-gdb.exe",
+            "deviceName": "STM32H743VI",
+            "deviceCore": "Cortex-M7",
+            "serverInterface": "SWD",
+            "serverInterfaceFrequency": "1000",
+            "serverSerialNumber": "22025702234D4E504E413836",
+            "serverHost": "localhost",
+            "serverPort": "61234",
+            "serverReset": "Connect under reset",
+            "serverVerify": true,
+            "runEntry": "main",
+            "program": "${workspaceFolder}/build/gcc/servo_app.elf",
+            "imagesAndSymbols": [
+                {
+                    "imageFileName": "${workspaceFolder}/build/gcc/servo_app.elf",
+                    "symbolFileName": "${workspaceFolder}/build/gcc/servo_app.elf"
+                }
+            ],
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 4
+            }
+        },
+        {
+            "name": "STM32: Build only",
+            "type": "node-terminal",
+            "request": "launch",
+            "preLaunchTask": "STM32：编译（GCC）",
+            "command": "Write-Output 'STM32 GCC build completed.'",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

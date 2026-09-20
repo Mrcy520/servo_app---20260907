@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "platformio.platformio-ide",
+        "ms-ceintl.vscode-language-pack-zh-hans",
+        "marus25.cortex-debug",
+        "ms-vscode.cpptools"
+    ]
+}

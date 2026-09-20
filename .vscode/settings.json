@@ -1,0 +1,57 @@
+{
+    "C_Cpp.default.compileCommands": "",
+    "C_Cpp.default.configurationProvider": "",
+    "C_Cpp.autocomplete": "disabled",
+    "C_Cpp.debugShortcut": false,
+    "C_Cpp.errorSquiggles": "disabled",
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "code-runner.ignoreSelection": true,
+    "code-runner.runInTerminal": true,
+    "cortex-debug.liveWatchRefreshRate": 300,
+    "code-runner.executorMap": {
+        "c": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$workspaceRoot/.vscode/check-project.ps1\" -WorkspaceRoot \"$workspaceRoot\"",
+        "cpp": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$workspaceRoot/.vscode/check-project.ps1\" -WorkspaceRoot \"$workspaceRoot\""
+    },
+    "files.associations": {
+        "*.h": "c"
+    },
+    "cortex-debug.variableUseNaturalFormat": true,
+
+    "stm32cube-ide-clangd.path": "C:\\Users\\chenx\\AppData\\Local\\stm32cube\\bundles\\st-arm-clangd\\21.1.0+st.2\\bin\\starm-clangd.exe",
+    "stm32cube-ide-clangd.enable": true,
+    "stm32cube-ide-clangd.enableCodeCompletion": true,
+    "stm32cube-ide-clangd.enableHover": true,
+    "stm32cube-ide-clangd.enableLinting": true,
+    "stm32cube-ide-clangd.arguments": [
+        "--background-index",
+        "--header-insertion=never",
+        "--pch-storage=memory",
+        "--compile-commands-dir=${workspaceFolder}",
+        "--query-driver=D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc.exe"
+    ],
+    "stm32cube-ide-clangd.fallbackFlags": [
+        "--target=arm-none-eabi",
+        "-std=gnu11",
+        "-mcpu=cortex-m7",
+        "-mthumb",
+        "-mfpu=fpv5-d16",
+        "-mfloat-abi=hard",
+        "-DSTM32H743xx",
+        "-DUSE_FULL_LL_DRIVER",
+        "-DRAM_DEBUG=0",
+        "-I${workspaceFolder}/App",
+        "-I${workspaceFolder}/Bsp",
+        "-I${workspaceFolder}/Bsp/LED",
+        "-I${workspaceFolder}/Bsp/UART",
+        "-I${workspaceFolder}/CMSIS/Inc",
+        "-I${workspaceFolder}/Driver/Inc",
+        "-I${workspaceFolder}/Driver/Inc/Legacy",
+        "-I${workspaceFolder}/STM32H7xx_Device/Inc",
+        "-isystem",
+        "D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/arm-none-eabi/include",
+        "-isystem",
+        "D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include",
+        "-isystem",
+        "D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include-fixed"
+    ]
+}

@@ -1,0 +1,22 @@
+iar将程序在ram中仿真：
+1. .icf 链接文件（必须）
+修改.intvec start为0x24000000
+修改place in AXISR_region { readonly };
+让代码放在 0x24000000 RAM
+2. Options→Debugger → Download（必须）
+取消 Use flash loader
+不烧 Flash，只加载到 RAM
+3. SystemInit 里（必须）
+SCB->VTOR = 0x24000000;
+
+iar将程序放在flash中：
+1. .icf 链接文件（必须）
+修改.intvec start为0x08020000
+
+修改place in FLASH_region { readonly };
+
+2. Options→Debugger → Download（必须）
+勾选 Use flash loader
+
+3. SystemInit 里（必须）
+SCB->VTOR = 0x08020000;

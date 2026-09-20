@@ -1,0 +1,46 @@
+{
+    "configurations": [
+        {
+            "name": "STM32H743 (GNU Arm GCC)",
+            "includePath": [
+                "${workspaceFolder}/App",
+                "${workspaceFolder}/Bsp",
+                "${workspaceFolder}/Bsp/LED",
+                "${workspaceFolder}/Bsp/UART",
+                "${workspaceFolder}/CMSIS/Inc",
+                "${workspaceFolder}/Driver/Inc",
+                "${workspaceFolder}/Driver/Inc/Legacy",
+                "${workspaceFolder}/STM32H7xx_Device/Inc",
+                "D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/arm-none-eabi/include",
+                "D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include"
+            ],
+            "defines": [
+                "STM32H743xx",
+                "USE_FULL_LL_DRIVER",
+                "RAM_DEBUG=0",
+                "VSCODE_INTELLISENSE=1"
+            ],
+            "compilerPath": "D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/bin/arm-none-eabi-gcc.exe",
+            "compilerArgs": [
+                "-mcpu=cortex-m7",
+                "-mthumb",
+                "-mfpu=fpv5-d16",
+                "-mfloat-abi=hard"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "windows-gcc-arm",
+            "browse": {
+                "path": [
+                    "${workspaceFolder}/App",
+                    "${workspaceFolder}/Bsp",
+                    "${workspaceFolder}/CMSIS/Inc",
+                    "${workspaceFolder}/Driver/Inc",
+                    "${workspaceFolder}/STM32H7xx_Device/Inc"
+                ],
+                "limitSymbolsToIncludedHeaders": true
+            }
+        }
+    ],
+    "version": 4
+}

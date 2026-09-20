@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>控制板原理图—中文标注分析</title>
+<style>
+  @page { size: A3 landscape; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #dbe2ea; font-family: "Microsoft YaHei", "Noto Sans CJK SC", Arial, sans-serif; color: #172033; }
+  .page { width: 420mm; height: 297mm; position: relative; background: #fff; page-break-after: always; overflow: hidden; }
+  .page:last-child { page-break-after: auto; }
+  .head { position: absolute; left: 7mm; top: 4mm; width: 326mm; height: 9mm; display: flex; justify-content: space-between; align-items: center; }
+  .head h1 { margin: 0; font-size: 5.1mm; color: #102f55; letter-spacing: .2mm; }
+  .head .tag { font-size: 3mm; color: #54708f; }
+  .sheet { position: absolute; left: 7mm; top: 14mm; width: 326mm; height: 230.5mm; border: .35mm solid #8292a6; background: #fff; overflow: hidden; }
+  .sheet img { display: block; width: 100%; height: 100%; object-fit: fill; }
+  .mark { position: absolute; width: 8mm; height: 8mm; margin: -4mm 0 0 -4mm; border-radius: 50%; background: #e63946; border: .7mm solid #fff; color: #fff; font-weight: 800; font-size: 4mm; line-height: 6.6mm; text-align: center; box-shadow: 0 0 0 .6mm rgba(122,22,31,.7), 0 1mm 2mm rgba(0,0,0,.22); }
+  .mark.blue { background: #1769aa; box-shadow: 0 0 0 .6mm rgba(14,70,114,.75), 0 1mm 2mm rgba(0,0,0,.22); }
+  .mark.orange { background: #d97706; box-shadow: 0 0 0 .6mm rgba(132,70,0,.75), 0 1mm 2mm rgba(0,0,0,.22); }
+  .panel { position: absolute; left: 337mm; top: 7mm; width: 77mm; height: 283mm; padding: 4.2mm; background: #f6f8fb; border: .5mm solid #aab6c5; border-radius: 2mm; }
+  .panel h2 { margin: 0 0 3mm; padding-bottom: 2mm; border-bottom: .5mm solid #9eacbd; color: #102f55; font-size: 5mm; }
+  .item { margin: 0 0 2.4mm; font-size: 3.25mm; line-height: 1.45; }
+  .num { display: inline-block; width: 5.3mm; height: 5.3mm; margin-right: 1.5mm; border-radius: 50%; background: #e63946; color: #fff; text-align: center; line-height: 5.3mm; font-weight: 800; vertical-align: .3mm; }
+  .num.blue { background: #1769aa; }
+  .num.orange { background: #d97706; }
+  .mini { font-size: 2.85mm; color: #425369; line-height: 1.45; }
+  .danger { color: #a3101d; font-weight: 800; }
+  .good { color: #087c60; font-weight: 700; }
+  .footnote { position: absolute; left: 7mm; top: 249mm; width: 326mm; height: 41mm; padding: 3.2mm 4mm; border: .5mm solid #c4ced9; background: #f7fafc; font-size: 3.25mm; line-height: 1.48; }
+  .footnote strong { color: #102f55; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: .3mm solid #aeb9c7; padding: 1.3mm 1.7mm; text-align: left; vertical-align: top; }
+  th { background: #e8eef5; color: #183a5e; font-weight: 700; }
+  .summary { padding: 10mm 12mm; }
+  .summary h1 { margin: 0 0 2mm; font-size: 8mm; color: #102f55; }
+  .summary .sub { font-size: 3.7mm; color: #60738a; margin-bottom: 5mm; }
+  .grid { display: grid; grid-template-columns: 1.02fr .98fr; gap: 5mm; }
+  .card { border: .5mm solid #aeb9c7; border-radius: 2.2mm; padding: 4.5mm; background: #fbfcfe; break-inside: avoid; }
+  .card h2 { margin: 0 0 3mm; font-size: 5mm; color: #123b64; }
+  .card p, .card li, .card td, .card th { font-size: 3.35mm; line-height: 1.48; }
+  .card ul { margin: 1.5mm 0 0 5mm; padding: 0; }
+  .flow { display: flex; align-items: stretch; gap: 2mm; margin: 2mm 0 3mm; }
+  .box { flex: 1; padding: 3mm 2mm; border-radius: 1.5mm; text-align: center; background: #e7f0fa; border: .4mm solid #7ea4ca; font-size: 3.25mm; font-weight: 700; }
+  .arrow { display: flex; align-items: center; color: #38668e; font-size: 6mm; font-weight: 700; }
+  .warnbox { margin-top: 3mm; padding: 3mm; border: .65mm solid #dc3545; background: #fff0f1; color: #8c1620; font-size: 3.5mm; font-weight: 750; }
+  .smallnote { margin-top: 2.5mm; font-size: 2.9mm; line-height: 1.45; color: #516377; }
+  .pill { display: inline-block; padding: .4mm 1.8mm; border-radius: 5mm; background: #dde9f5; color: #214e78; font-weight: 700; }
+  .code { font-family: Consolas, "Microsoft YaHei", monospace; }
+</style>
+</head>
+<body>
+
+<!-- 第 1 页：MCU 与低速接口 -->
+<section class="page">
+  <div class="head"><h1>第 1 页｜主控、调试与 SPI/I²C 接口</h1><div class="tag">红色编号与右侧说明对应</div></div>
+  <div class="sheet">
+    <img src="source/source-page-1.png" alt="原理图第1页">
+    <span class="mark" style="left:43%;top:47%">1</span>
+    <span class="mark blue" style="left:92.5%;top:10.5%">2</span>
+    <span class="mark blue" style="left:70%;top:27%">3</span>
+    <span class="mark blue" style="left:70%;top:43%">4</span>
+    <span class="mark orange" style="left:92%;top:61%">5</span>
+    <span class="mark orange" style="left:92%;top:74%">6</span>
+    <span class="mark blue" style="left:27%;top:57%">7</span>
+    <span class="mark" style="left:93%;top:22%">8</span>
+  </div>
+  <aside class="panel">
+    <h2>功能说明</h2>
+    <p class="item"><span class="num">1</span><b>U1 主控</b><br>STM32H743VGT6，负责 8 路 UART、两路 SPI、I²C、LED 与调试。注意：工程目标曾显示 H743VI，需核对实物丝印与 Flash 容量。</p>
+    <p class="item"><span class="num blue">2</span><b>J4 下载/调试</b><br>3.3V、SWDIO、SWCLK、GND；另引出 UART1_TX/RX。它不是主电源入口。</p>
+    <p class="item"><span class="num blue">3</span><b>U22 EEPROM</b><br>BL24C32，I²C1 地址由器件固定脚决定；存配置/校准数据。</p>
+    <p class="item"><span class="num blue">4</span><b>U23 温度传感器</b><br>STS40，挂在 I²C1 的 SCL/SDA 上。</p>
+    <p class="item"><span class="num orange">5</span><b>J1：SPI1</b><br>3.3V、SCK、MISO、MOSI、nCS1、GND。</p>
+    <p class="item"><span class="num orange">6</span><b>J12：SPI2</b><br>3.3V、SCK、MISO、MOSI、nCS2、GND。</p>
+    <p class="item"><span class="num blue">7</span><b>时钟/启动/去耦</b><br>25 MHz 晶振、BOOT 电阻与 MCU 各电源脚电容。</p>
+    <p class="item"><span class="num">8</span><b>RUN 指示灯</b><br>LED_RUN 控制，串联 4.7 kΩ。</p>
+  </aside>
+  <div class="footnote"><strong>UART 到 RS422 的对应关系：</strong>UART2→通道1/J5；UART7→通道2/J6；UART3→通道3/J7；UART6→通道4/J8；UART1→通道5/J9；UART4→通道6/J10；UART5→通道7/J2；UART8→通道8/J3。<br><span class="mini">SPI/I²C/UART 均为 3.3V 逻辑。外设供电和信号电平不得直接接 5V 到 MCU 引脚。</span></div>
+</section>
+
+<!-- 第 2 页：RS422 -->
+<section class="page">
+  <div class="head"><h1>第 2 页｜8 路全双工 RS422 收发与隔离</h1><div class="tag">A/B 为板端接收；Y/Z 为板端发送</div></div>
+  <div class="sheet">
+    <img src="source/source-page-2.png" alt="原理图第2页">
+    <span class="mark blue" style="left:18%;top:22%">1</span>
+    <span class="mark" style="left:45%;top:22%">2</span>
+    <span class="mark" style="left:45%;top:60%">3</span>
+    <span class="mark orange" style="left:71%;top:44%">4</span>
+    <span class="mark orange" style="left:65%;top:20%">5</span>
+    <span class="mark blue" style="left:82%;top:31%">6</span>
+    <span class="mark blue" style="left:35%;top:43%">7</span>
+  </div>
+  <aside class="panel">
+    <h2>功能说明</h2>
+    <p class="item"><span class="num blue">1</span><b>J2/J3：普通 RS422</b><br>通道7、8直接连 MCU 电源域，无数字隔离。</p>
+    <p class="item"><span class="num">2</span><b>ISO1 隔离组</b><br>J5/J6/J7（通道1～3）经 NSI8021 隔离，共用 GND1 与 +3.3V_ISO1。</p>
+    <p class="item"><span class="num">3</span><b>ISO2 隔离组</b><br>J8/J9/J10（通道4～6）经 NSI8021 隔离，共用 GND2 与 +3.3V_ISO2。</p>
+    <p class="item"><span class="num orange">4</span><b>外部 4 针接口</b><br>J5～J10 的原理图针序：1=Y(TX+)、2=Z(TX−)、3=B(RX−)、4=A(RX+)。</p>
+    <p class="item"><span class="num orange">5</span><b>120 Ω 终端</b><br>A-B 与 Y-Z 各一只，抑制长线反射。对端若也固定带终端，需确认总负载。</p>
+    <p class="item"><span class="num blue">6</span><b>浪涌/ESD 箝位</b><br>差分线上的保护器件接到对应隔离地。</p>
+    <p class="item"><span class="num blue">7</span><b>MAX3490E</b><br>全双工收发器：R 接收 A/B；D 驱动 Y/Z。</p>
+    <p class="mini"><b>关键点：</b>同一隔离组的 3 个通道彼此不隔离，只与 MCU 主地隔离。</p>
+  </aside>
+  <div class="footnote"><strong>GSA200 接 J5（推荐先用通道1）：</strong>蓝 RX+→J5-1/Y；棕 RX−→J5-2/Z；黄 TX−→J5-3/B；白 TX+→J5-4/A；红线→外部稳定 +5V；黑线→该 5V 电源 GND。<span class="danger">红/黑电源线不要塞进 J5，J5 只有差分信号。</span><br><span class="mini">板上方照片从左到右可见 J10、J9、J8、J7、J6、J5；插接前仍应以 PCB 丝印和万用表通断确认，不按线色盲接。</span></div>
+</section>
+
+<!-- 第 3 页：电源 -->
+<section class="page">
+  <div class="head"><h1>第 3 页｜12V 输入、5V 主电源与两组隔离电源</h1><div class="tag">供电入口是 J11，不是 SWD/J4</div></div>
+  <div class="sheet">
+    <img src="source/source-page-3.png" alt="原理图第3页">
+    <span class="mark" style="left:21%;top:15.5%">1</span>
+    <span class="mark blue" style="left:32.5%;top:16%">2</span>
+    <span class="mark orange" style="left:51%;top:20%">3</span>
+    <span class="mark orange" style="left:70%;top:16%">4</span>
+    <span class="mark blue" style="left:52%;top:42%">5</span>
+    <span class="mark" style="left:55%;top:57%">6</span>
+    <span class="mark" style="left:55%;top:68%">7</span>
+    <span class="mark orange" style="left:51%;top:30%">8</span>
+  </div>
+  <aside class="panel">
+    <h2>功能说明</h2>
+    <p class="item"><span class="num">1</span><b>J11：主电源输入</b><br>网络名明确为 +12V/GND。板上照片左侧、灰色“6R8”电感附近的小白插座。</p>
+    <p class="item"><span class="num blue">2</span><b>输入保护/滤波</b><br>D2=SMBJ16A TVS；C45/C46 为 25V 输入电容。用于吸收瞬态并滤波。</p>
+    <p class="item"><span class="num orange">3</span><b>U17 降压</b><br>TPS54331 + L1(6.8µH) + D1(SS56)，把输入降为 +5V。</p>
+    <p class="item"><span class="num orange">4</span><b>+5V 母线</b><br>供后级 3.3V 稳压与两只隔离 DC/DC 使用。</p>
+    <p class="item"><span class="num blue">5</span><b>主 3.3V</b><br>U7：5V→VCC3.3V，标称 500mA，供 MCU 与主逻辑。</p>
+    <p class="item"><span class="num">6</span><b>ISO1 电源</b><br>U18 B0505S 隔离 5V，再由 U20 生成 +3.3V_ISO1/GND1。</p>
+    <p class="item"><span class="num">7</span><b>ISO2 电源</b><br>U19/U21 同理，生成 +3.3V_ISO2/GND2。</p>
+    <p class="item"><span class="num orange">8</span><b>“28V”文字解释</b><br>表示 TPS54331 的输入能力上限背景，不是这块板的额定输入。</p>
+  </aside>
+  <div class="footnote"><span class="danger">正确做法：给 J11 输入稳定 12V 直流，先限流 0.2～0.5A 上电观察；确认无短路后再逐步提高限流。</span><br>图中输入电容只有 25V、TVS 为 SMBJ16A，且网络名全程写 +12V，因此<span class="danger">不要给 J11 接 28V</span>。上电后依次测：J11≈12V → C63/C64≈5V → U7 输出≈3.3V → 隔离侧各≈5V/3.3V。</div>
+</section>
+
+<!-- 第 4 页：综合接线与软件核对 -->
+<section class="page summary">
+  <h1>控制板综合结论与上电检查单</h1>
+  <div class="sub">板型判断：以 STM32H743 为核心的 8 路全双工 RS422 控制板，含 6 路分组隔离、2 路非隔离、SPI/I²C 扩展和板载多路电源。</div>
+  <div class="grid">
+    <div class="card">
+      <h2>1. 电源树</h2>
+      <div class="flow"><div class="box">J11<br>12V DC</div><div class="arrow">→</div><div class="box">TPS54331<br>5V / 最多约3A设计</div><div class="arrow">→</div><div class="box">U7<br>主 3.3V</div></div>
+      <div class="flow"><div class="box">5V</div><div class="arrow">→</div><div class="box">U18 隔离5V</div><div class="arrow">→</div><div class="box">U20<br>3.3V_ISO1</div></div>
+      <div class="flow"><div class="box">5V</div><div class="arrow">→</div><div class="box">U19 隔离5V</div><div class="arrow">→</div><div class="box">U21<br>3.3V_ISO2</div></div>
+      <div class="warnbox">J11 只能按原理图额定的 12V 供电。不要把“28V降压5V/3A”理解成允许整板输入 28V。</div>
+      <div class="smallnote">建议首次上电：断开 GSA200 和所有外设；台式电源设 12.0V，限流 0.2A 起步。若立刻限流或芯片明显发热，立即断电排查。极性不确定时先用万用表找 GND 铜皮/电容负端。</div>
+    </div>
+    <div class="card">
+      <h2>2. GSA200 → J5 精确接线</h2>
+      <table>
+        <tr><th>GSA200 标识/线色</th><th>板端 J5</th><th>含义</th></tr>
+        <tr><td>蓝：RX+</td><td>1：Y</td><td>板 TX+ → 传感器 RX+</td></tr>
+        <tr><td>棕：RX−</td><td>2：Z</td><td>板 TX− → 传感器 RX−</td></tr>
+        <tr><td>黄：TX−</td><td>3：B</td><td>传感器 TX− → 板 RX−</td></tr>
+        <tr><td>白：TX+</td><td>4：A</td><td>传感器 TX+ → 板 RX+</td></tr>
+        <tr><td>红：5V</td><td>外部 +5V</td><td>传感器电源正</td></tr>
+        <tr><td>黑：GND</td><td>外部 5V GND</td><td>传感器电源负</td></tr>
+      </table>
+      <div class="smallnote"><span class="pill">方向判断</span> 板端 Y/Z 是“发出去”，必须接传感器 RX±；板端 A/B 是“收进来”，必须接传感器 TX±。若只是不通信但无异常电流，优先核对插头视角、针号与 ± 极性。</div>
+    </div>
+    <div class="card">
+      <h2>3. 通道、插座与固件对应</h2>
+      <table>
+        <tr><th>通道/插座</th><th>MCU 串口</th><th>隔离域</th><th>当前 main.c</th></tr>
+        <tr><td>1 / J5</td><td>UART2 PA2/PA3</td><td>ISO1</td><td class="good">已初始化</td></tr>
+        <tr><td>2 / J6</td><td>UART7 PE8/PE7</td><td>ISO1</td><td class="good">已初始化</td></tr>
+        <tr><td>3 / J7</td><td>UART3 PB10/PB11</td><td>ISO1</td><td class="good">已初始化</td></tr>
+        <tr><td>4 / J8</td><td>UART6 PC6/PC7</td><td>ISO2</td><td>未初始化</td></tr>
+        <tr><td>5 / J9</td><td>UART1 PA9/PA10</td><td>ISO2</td><td>未初始化</td></tr>
+        <tr><td>6 / J10</td><td>UART4 PC10/PC11</td><td>ISO2</td><td class="good">已初始化</td></tr>
+        <tr><td>7 / J2</td><td>UART5 PC12/PD2</td><td>主地</td><td>未初始化</td></tr>
+        <tr><td>8 / J3</td><td>UART8 PE1/PE0</td><td>主地</td><td>未初始化</td></tr>
+      </table>
+      <div class="smallnote">照片中板上沿接口从左到右：<b>J10、J9、J8、J7、J6、J5</b>。当前初始化波特率为 921600；必须与 GSA200 协议一致。</div>
+    </div>
+    <div class="card">
+      <h2>4. 固件审查发现的风险</h2>
+      <ul>
+        <li><span class="code">uart_receive_packet_t.buffer[127]</span>，但 DMA 接收长度定义为 255；中断拷贝可能越界，应优先修正。</li>
+        <li>DMA 缓冲区使用固定地址 <span class="code">0x3001F000～0x3001FF00</span>，链接脚本未显式保留时可能与其他数据冲突。</li>
+        <li><span class="code">LL_USART_EnableDMADeactOnRxErr()</span> 会在接收错误时撤销 DMA 请求，与代码注释含义相反，错误后可能停止接收。</li>
+        <li>主循环会闪灯，并每 1 ms 通过 UART2 发送 20 字节测试帧，但没有处理各 UART 的接收完成标志；接收数据目前不会进入业务解析。</li>
+        <li>原理图标注 U1 为 STM32H743VGT6，而工程目标/链接配置曾指向 H743VI；烧录前应核对 MCU 顶面丝印和 Flash 大小。</li>
+      </ul>
+      <div class="smallnote">这些是基于当前工作区源码与原理图的静态检查结论；通讯协议、GSA200 波特率/帧格式仍需以传感器说明书或实测为准。</div>
+    </div>
+  </div>
+</section>
+</body>
+</html>

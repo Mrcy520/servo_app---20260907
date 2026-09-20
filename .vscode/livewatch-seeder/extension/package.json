@@ -1,0 +1,18 @@
+{
+  "name": "codex-livewatch-seeder",
+  "displayName": "Codex Live Watch Seeder",
+  "description": "One-time helper that initializes Cortex-Debug Live Watch expressions.",
+  "version": "0.0.3",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri"
+  ],
+  "main": "./extension.js"
+}

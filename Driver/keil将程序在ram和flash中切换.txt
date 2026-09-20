@@ -1,0 +1,5 @@
+1.将Target中的IROM1或者IROM2切换成flash或者RAM
+
+2.将Debug的Initialization File加载为keil_debugRam.ini
+
+3.将Utilities的Update Target before Debugging取消

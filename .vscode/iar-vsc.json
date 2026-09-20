@@ -1,0 +1,15 @@
+{
+  "workspace": {
+    "path": "${workspaceFolder}\\Project\\EWARM\\servo_app.eww"
+  },
+  "workspaces": {
+    "${workspaceFolder}\\Project\\EWARM\\servo_app.eww": {
+      "configs": {
+        "${workspaceFolder}\\Project\\EWARM\\servo_app.ewp": "stm32h743vit6"
+      },
+      "selected": {
+        "path": "${workspaceFolder}\\Project\\EWARM\\servo_app.ewp"
+      }
+    }
+  }
+}
