@@ -1,5 +1,6 @@
 #include "boot_jump.h"
 #include "bsp_uart.h"
+#include "uart1_terminal.h"
 #include "stm32h7xx_ll_cortex.h"
 #include "stm32h7xx_ll_rcc.h"
 
@@ -65,6 +66,7 @@ __IO uint8_t boot_7f_count = 0U;
 void boot_init(void)
 {
     uart1_init(115200);
+    uart1_terminal_init();
 }
 
 
@@ -95,7 +97,9 @@ static uint8_t boot_send_ack(void)
     uint32_t timeout = BOOT_TX_WAIT_LIMIT;
     const uint8_t ack = BOOT_ACK;
 
-    uart1_transmit(&ack, 1U);
+    /* The ACK is sent before the peripheral reset/jump.  Use the USART
+     * register directly so it cannot be lost in a DMA teardown race. */
+    LL_DMA_DisableStream(DMA1, LL_DMA_STREAM_0);
     while (LL_DMA_IsEnabledStream(DMA1, LL_DMA_STREAM_0))
     {
         if (timeout-- == 0U)
@@ -103,6 +107,16 @@ static uint8_t boot_send_ack(void)
             return 0U;
         }
     }
+
+    timeout = BOOT_TX_WAIT_LIMIT;
+    while (LL_USART_IsActiveFlag_TXE(USART1) == 0U)
+    {
+        if (timeout-- == 0U)
+        {
+            return 0U;
+        }
+    }
+    LL_USART_TransmitData8(USART1, ack);
 
     timeout = BOOT_TX_WAIT_LIMIT;
     while (LL_USART_IsActiveFlag_TC(USART1) == 0U)
@@ -239,6 +253,7 @@ void boot_poll(void)
         else
         {
             boot_7f_count = 0U;
+            uart1_terminal_process_byte(uart1_rx.buffer[index]);
         }
     }
 

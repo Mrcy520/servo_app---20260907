@@ -8,11 +8,11 @@
  *       这样就可以用 USB 转串口直接烧固件，不再需要烧录器。
  *
  * 用哪个串口：USART1 -> PA9/PA10 -> J9（通道5）
- *   选它的三个理由：
- *     1) 代码里完全没被占用 —— uart1_init 全工程零调用
+ *   该接口同时承载应用态电机控制终端：
+ *     1) boot_poll() 统一分发接收数据，下载触发字节拥有最高优先级
  *     2) H743 的 ROM Bootloader 只认 USART1/2/3，
  *        而 USART2(J5) 被业务占用、USART3(J7) 被 printf 占用
- *     3) J9 是空通道，烧录时不用拔任何外设
+ *     3) 普通 ASCII 字节交给 uart1_terminal，连续三个 0x7F 仍按原流程下载
  *
  * 硬件前提：
  *   J9 出来的是 RS-422 差分信号（经 U9 隔离器 + U15 MAX3490），不是 TTL，
@@ -36,7 +36,7 @@ extern volatile uint8_t boot_7f_count;
 /* 初始化：打开 UART1。调用位置见 boot_jump.c 的说明 */
 extern void boot_init(void);
 
-/* 轮询：主循环调用。未触发时几乎零开销 */
+/* 轮询：主循环调用，同时分发下载触发字节和终端命令字节。 */
 extern void boot_poll(void);
 
 #endif /* __BOOT_JUMP_H__ */

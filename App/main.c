@@ -21,6 +21,8 @@
 #include "gsa200.h"
 #include "j8_uart_test.h"
 #include "main.h"
+#include "pcu.h"
+#include "uart4_tx_test.h"
 
 __IO uint32_t u32_timer_1ms;
 __IO uint16_t u16_led_count;
@@ -71,7 +73,11 @@ int main(void)
   uart2_init(BAUDRATE_460800);
   gsa200_init();
   uart3_init(BAUDRATE_921600);
-  uart4_init(BAUDRATE_921600);
+#if UART4_TX_TEST_ENABLED
+  uart4_tx_test_init();
+#else
+  pcu_init(BAUDRATE_921600, PCU_DEFAULT_DEVICE_ID);
+#endif
   uart7_init(BAUDRATE_921600);
   j8_uart_test_init();
 
@@ -86,6 +92,11 @@ int main(void)
 	while (1)
 	{
 		gsa200_poll(u32_timer_1ms);
+#if UART4_TX_TEST_ENABLED
+		uart4_tx_test_poll(u32_timer_1ms);
+#else
+		pcu_poll();
+#endif
 		boot_poll();
 		j8_uart_test_poll(u32_timer_1ms);
 
