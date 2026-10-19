@@ -9,6 +9,7 @@
 #define GSA200_HEADER_55        (0x55U)
 #define GSA200_FORMAT_ID        (0x01U)
 #define GSA200_BAUD_SWITCH_MS   (700U)
+#define GSA200_DATA_TIMEOUT_MS  (1000U)
 #define GSA200_SAMPLE_PERIOD_S  (0.0005f)
 
 volatile gsa200_data_t g_gsa200;
@@ -28,6 +29,8 @@ volatile uint32_t gsa200_valid_frames;
 volatile uint32_t gsa200_checksum_errors;
 volatile uint32_t gsa200_format_errors;
 volatile uint32_t gsa200_dropped_frames;
+volatile uint8_t gsa200_data_valid;
+volatile uint32_t gsa200_active_baudrate;
 volatile uint32_t gsa200_frame_word0;
 volatile uint32_t gsa200_frame_word1;
 volatile uint32_t gsa200_frame_word2;
@@ -41,6 +44,7 @@ static uint8_t frame[GSA200_FRAME_SIZE];
 static uint8_t frame_index;
 static uint8_t have_previous_counter;
 static uint32_t last_baud_switch_ms;
+static uint32_t last_valid_frame_ms;
 
 static float read_float_be(const uint8_t *source)
 {
@@ -57,8 +61,7 @@ static float read_float_be(const uint8_t *source)
 static void accept_frame(void)
 {
     uint8_t sample_delta = 1U;
-    uint8_t expected_counter;
-    uint8_t missed;
+    uint8_t delta;
     uint8_t axis;
     int16_t raw_temperature;
 
@@ -75,12 +78,21 @@ static void accept_frame(void)
 
     if (have_previous_counter != 0U)
     {
-        expected_counter = (uint8_t)(g_gsa200.sample_counter + 1U);
-        sample_delta = (uint8_t)(frame[30] - g_gsa200.sample_counter);
-        if (frame[30] != expected_counter)
+        delta = (uint8_t)(frame[30] - g_gsa200.sample_counter);
+        if ((delta > 1U) && (delta < 128U))
         {
-            missed = (uint8_t)(frame[30] - expected_counter);
-            g_gsa200.dropped_frames += missed;
+            g_gsa200.dropped_frames += (uint32_t)(delta - 1U);
+            sample_delta = delta;
+        }
+        else if (delta == 1U)
+        {
+            sample_delta = 1U;
+        }
+        else
+        {
+            /* Duplicate or out-of-order counters must not create a huge
+               unsigned wraparound in the dropped-frame statistic. */
+            sample_delta = 0U;
         }
     }
 
@@ -117,6 +129,8 @@ static void accept_frame(void)
     gsa200_checksum_errors = g_gsa200.checksum_errors;
     gsa200_format_errors = g_gsa200.format_errors;
     gsa200_dropped_frames = g_gsa200.dropped_frames;
+    gsa200_data_valid = g_gsa200.data_valid;
+    gsa200_active_baudrate = g_gsa200.active_baudrate;
     gsa200_frame_word0 = ((uint32_t)frame[0] << 24) | ((uint32_t)frame[1] << 16) |
                          ((uint32_t)frame[2] << 8) | frame[3];
     gsa200_frame_word1 = ((uint32_t)frame[4] << 24) | ((uint32_t)frame[5] << 16) |
@@ -210,6 +224,7 @@ void gsa200_init(void)
     memset(frame, 0, sizeof(frame));
     frame_index = 0U;
     have_previous_counter = 0U;
+    last_valid_frame_ms = 0U;
     last_baud_switch_ms = 0U;
 
     gsa200_gyro_x_dps = 0.0f;
@@ -227,6 +242,8 @@ void gsa200_init(void)
     gsa200_checksum_errors = 0U;
     gsa200_format_errors = 0U;
     gsa200_dropped_frames = 0U;
+    gsa200_data_valid = 0U;
+    gsa200_active_baudrate = BAUDRATE_460800;
     gsa200_frame_word0 = 0U;
     gsa200_frame_word1 = 0U;
     gsa200_frame_word2 = 0U;
@@ -240,10 +257,23 @@ void gsa200_init(void)
 void gsa200_poll(uint32_t now_ms)
 {
     uint8_t byte;
+    uint32_t valid_frames_before = g_gsa200.valid_frames;
 
     while (uart2_read_byte(&byte) != 0U)
     {
         process_byte(byte);
+    }
+
+    if (g_gsa200.valid_frames != valid_frames_before)
+    {
+        last_valid_frame_ms = now_ms;
+    }
+
+    if ((g_gsa200.data_valid != 0U) &&
+        ((uint32_t)(now_ms - last_valid_frame_ms) >= GSA200_DATA_TIMEOUT_MS))
+    {
+        g_gsa200.data_valid = 0U;
+        gsa200_data_valid = 0U;
     }
 
     if ((g_gsa200.data_valid == 0U) &&
@@ -265,6 +295,7 @@ void gsa200_poll(uint32_t now_ms)
             break;
         }
         uart2_init(g_gsa200.active_baudrate);
+        gsa200_active_baudrate = g_gsa200.active_baudrate;
         frame_index = 0U;
         have_previous_counter = 0U;
         last_baud_switch_ms = now_ms;

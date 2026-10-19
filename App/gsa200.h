@@ -37,6 +37,8 @@ extern volatile uint32_t gsa200_valid_frames;
 extern volatile uint32_t gsa200_checksum_errors;
 extern volatile uint32_t gsa200_format_errors;
 extern volatile uint32_t gsa200_dropped_frames;
+extern volatile uint8_t gsa200_data_valid;
+extern volatile uint32_t gsa200_active_baudrate;
 extern volatile uint32_t gsa200_frame_word0;
 extern volatile uint32_t gsa200_frame_word1;
 extern volatile uint32_t gsa200_frame_word2;
