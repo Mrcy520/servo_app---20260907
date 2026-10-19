@@ -23,12 +23,21 @@ const EXPRESSIONS = [
     ["valid_frames", "gsa200_valid_frames"],
     ["checksum_errors", "gsa200_checksum_errors"],
     ["format_errors", "gsa200_format_errors"],
-    ["dropped_frames", "gsa200_dropped_frames"]
+    ["dropped_frames", "gsa200_dropped_frames"],
+    ["speed_reference_rpm", "pcu_speed_reference_rpm"],
+    ["speed_feedback_rpm", "pcu_speed_feedback_rpm"],
+    ["speed_error_rpm", "pcu_speed_error_rpm"],
+    ["speed_current_a", "pcu_speed_current_a"],
+    ["speed_output_norm", "pcu_speed_output_norm"],
+    ["speed_current_raw", "pcu_speed_current_raw"],
+    ["speed_control_updates", "pcu_speed_control_updates"],
+    ["speed_feedback_timeouts", "pcu_speed_feedback_timeouts"],
+    ["speed_command_errors", "pcu_speed_command_errors"]
 ];
 
 async function seedLiveWatch() {
     const folder = vscode.workspace.workspaceFolders?.[0];
-    if (!folder || !folder.uri.fsPath.toLowerCase().endsWith("servo_app - 20260907")) {
+    if (!folder) {
         return;
     }
 

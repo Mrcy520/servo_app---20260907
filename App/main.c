@@ -21,6 +21,10 @@
 #include "gsa200.h"
 #include "j8_uart_test.h"
 #include "main.h"
+#include "pcu.h"
+#include "pcu_position.h"
+#include "pcu_speed.h"
+#include "pcu_terminal.h"
 
 __IO uint32_t u32_timer_1ms;
 __IO uint16_t u16_led_count;
@@ -48,14 +52,35 @@ static void SystemClock_Config(void);
 static void MPU_Config(void);
 static void CPU_CACHE_Enable(void);
 
-// redefine fputc for printf
+static void usart3_printf_putc(uint8_t byte)
+{
+	while (LL_USART_IsActiveFlag_TC(USART3) == 0U)
+	{
+	}
+
+	LL_USART_TransmitData8(USART3, byte);
+}
+
+/* Retarget both stdio paths used by the IAR and GCC C libraries. */
 int fputc(int ch, FILE *f)
 {
-	// wait transmit ok
-	while(LL_USART_IsActiveFlag_TC(USART3) == 0);
-	// transmit current 
-	LL_USART_TransmitData8(USART3, (uint8_t)ch);
+	(void)f;
+	usart3_printf_putc((uint8_t)ch);
 	return ch;
+}
+
+/* PlatformIO links newlib with --specs=nosys.specs, so printf() writes via _write(). */
+int _write(int file, char *ptr, int len)
+{
+	int index;
+
+	(void)file;
+	for (index = 0; index < len; ++index)
+	{
+		usart3_printf_putc((uint8_t)ptr[index]);
+	}
+
+	return len;
 }
 
 int main(void)
@@ -71,7 +96,10 @@ int main(void)
   uart2_init(BAUDRATE_460800);
   gsa200_init();
   uart3_init(BAUDRATE_921600);
-  uart4_init(BAUDRATE_921600);
+  pcu_terminal_init();
+  pcu_init(BAUDRATE_921600, PCU_DEFAULT_DEVICE_ID);
+  pcu_position_init();
+  pcu_speed_init();
   uart7_init(BAUDRATE_921600);
   j8_uart_test_init();
 
@@ -86,9 +114,12 @@ int main(void)
 	while (1)
 	{
 		gsa200_poll(u32_timer_1ms);
+		pcu_poll();
+		pcu_position_poll(u32_timer_1ms);
+		pcu_speed_poll(u32_timer_1ms);
+		pcu_terminal_poll();
 		boot_poll();
 		j8_uart_test_poll(u32_timer_1ms);
-
 		// led 显示
 		if (u16_led_count < 1000)
 		{

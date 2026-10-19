@@ -5,7 +5,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$toolchain = 'D:\software\arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi\bin'
+$toolchainCandidates = @(
+    'D:\software\arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi\bin',
+    'C:\Program Files (x86)\Arm GNU Toolchain arm-none-eabi\14.2 rel1\bin'
+)
+$toolchain = $toolchainCandidates | Where-Object { (Test-Path $_) -and (Test-Path (Join-Path $_ 'arm-none-eabi-gcc.exe')) } | Select-Object -First 1
+if (-not $toolchain) {
+    throw 'GNU Arm toolchain not found in the configured candidate paths.'
+}
 $gcc = Join-Path $toolchain 'arm-none-eabi-gcc.exe'
 $objcopy = Join-Path $toolchain 'arm-none-eabi-objcopy.exe'
 $size = Join-Path $toolchain 'arm-none-eabi-size.exe'
@@ -24,6 +31,10 @@ $sources = @(
     'App\main.c',
     'App\boot_jump.c',
     'App\gsa200.c',
+    'App\pcu.c',
+    'App\pcu_position.c',
+    'App\pcu_speed.c',
+    'App\pcu_terminal.c',
     'App\j8_uart_test.c',
     'Bsp\LED\bsp_led.c',
     'Bsp\UART\bsp_uart.c',
@@ -76,6 +87,7 @@ $arguments = @(
     '-T', $linkerScript,
     '--specs=nano.specs',
     '--specs=nosys.specs',
+    '-Wl,-u,_printf_float',
     '-Wl,--gc-sections',
     "-Wl,-Map=$map,--cref",
     '-Wl,--start-group',

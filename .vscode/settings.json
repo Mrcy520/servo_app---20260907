@@ -53,5 +53,6 @@
         "D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include",
         "-isystem",
         "D:/software/arm-gnu-toolchain-14.2.rel1-mingw-w64-x86_64-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include-fixed"
-    ]
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }

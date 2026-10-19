@@ -1,8 +1,14 @@
 {
+    // See http://go.microsoft.com/fwlink/?LinkId=827846
+    // for the documentation about the extensions.json format
     "recommendations": [
-        "platformio.platformio-ide",
-        "ms-ceintl.vscode-language-pack-zh-hans",
         "marus25.cortex-debug",
-        "ms-vscode.cpptools"
+        "ms-ceintl.vscode-language-pack-zh-hans",
+        "ms-vscode.cpptools",
+        "platformio.platformio-ide"
+    ],
+    "unwantedRecommendations": [
+        "ms-vscode.cpptools-extension-pack",
+        "pioarduino.pioarduino-ide"
     ]
 }

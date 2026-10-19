@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "STM32：编译（GCC）",
+            "label": "STM32: Build (GCC)",
             "type": "shell",
             "command": "powershell",
             "args": [
@@ -26,7 +26,7 @@
             }
         },
         {
-            "label": "STM32：测试 ST-Link 连接",
+            "label": "STM32: Test ST-LINK connection",
             "type": "shell",
             "command": "powershell",
             "args": [
@@ -47,7 +47,7 @@
             }
         },
         {
-            "label": "STM32：ST-Link 烧录并运行",
+            "label": "STM32: Flash ST-LINK and run",
             "type": "shell",
             "command": "powershell",
             "args": [
@@ -59,7 +59,7 @@
                 "-WorkspaceRoot",
                 "${workspaceFolder}"
             ],
-            "dependsOn": "STM32：编译（GCC）",
+            "dependsOn": "STM32: Build (GCC)",
             "dependsOrder": "sequence",
             "problemMatcher": [],
             "presentation": {
@@ -69,7 +69,7 @@
             }
         },
         {
-            "label": "STM32：UART J9 烧录并运行",
+            "label": "STM32: Flash UART J9 and run",
             "type": "shell",
             "command": "powershell",
             "args": [
@@ -83,7 +83,7 @@
                 "-Port",
                 "COM3"
             ],
-            "dependsOn": "STM32：编译（GCC）",
+            "dependsOn": "STM32: Build (GCC)",
             "dependsOrder": "sequence",
             "problemMatcher": [],
             "presentation": {

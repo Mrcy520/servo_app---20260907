@@ -901,26 +901,33 @@ void uart4_init(uint32_t baudrate)
  */
 uint8_t uart4_transmit(const uint8_t u8_data[], uint8_t u8_length)
 {
-    // 定义返回值，初始化为要发送的长度（可在此处做长度越界判断）
     __IO uint8_t u8_len_temp = u8_length;
+    uint32_t guard = 0U;
 
-    // 循环等待：先关闭DMA发送流（Stream6），确保DMA停止工作
+    /* Do not overwrite the shared TX buffer while the previous frame is
+       still being shifted out. This matters for disable -> auto-zero. */
+    while (LL_DMA_IsEnabledStream(DMA1, LL_DMA_STREAM_6) != 0U)
+    {
+        if ((READ_REG(DMA1->HISR) & DMA_HISR_TCIF6) != 0U)
+        {
+            break;
+        }
+        if (++guard >= 1000000U)
+        {
+            break;
+        }
+    }
+
     do LL_DMA_DisableStream(DMA1, LL_DMA_STREAM_6);
     while (LL_DMA_IsEnabledStream(DMA1, LL_DMA_STREAM_6));
 
-    memcpy((uint8_t *)ADDR_UART4_TX, u8_data, u8_len_temp);// 将待发送数据拷贝到uart4 DMA发送缓冲区
-
-    LL_DMA_SetDataLength(DMA1, LL_DMA_STREAM_6, u8_len_temp);// 设置DMA本次要发送的数据长度
-
-    // 清除DMA1 Stream6所有中断标志位（半传输、传输完成、传输错误、直接模式错误、FIFO 错误等）
+    memcpy((uint8_t *)ADDR_UART4_TX, u8_data, u8_len_temp);
+    LL_DMA_SetDataLength(DMA1, LL_DMA_STREAM_6, u8_len_temp);
     WRITE_REG(DMA1->HIFCR, DMA_HIFCR_CHTIF6 | DMA_HIFCR_CTCIF6 |
                        DMA_HIFCR_CTEIF6 | DMA_HIFCR_CDMEIF6 |
                        DMA_HIFCR_CFEIF6);
-
-    // 重新使能DMA发送流，启动DMA发送
     LL_DMA_EnableStream(DMA1, LL_DMA_STREAM_6);
 
-    // 返回实际发送长度
     return u8_len_temp;
 }
 
