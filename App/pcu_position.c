@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "pcu.h"
+#include "pcu_current_test.h"
 #include "pcu_speed.h"
 
 /* Conservative values calibrated against the connected motor. */
@@ -126,7 +127,8 @@ void pcu_position_init(void)
 
 uint8_t pcu_position_start_relative(float delta_deg)
 {
-    if (!isfinite(delta_deg) || (delta_deg < -3600.0f) ||
+    if ((pcu_current_test_is_enabled() != 0U) ||
+        !isfinite(delta_deg) || (delta_deg < -3600.0f) ||
         (delta_deg > 3600.0f) || (g_pcu_status.data_valid == 0U) ||
         ((g_pcu_status.status & PCU_POSITION_FAULT_MASK) != 0U) ||
         (feedback_initialized == 0U) ||

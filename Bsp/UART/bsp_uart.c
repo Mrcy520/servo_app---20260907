@@ -247,7 +247,10 @@ void USART1_IRQHandler(void)
 
 volatile uart_receive_packet_t uart2_rx;
 volatile uint32_t uart2_rx_error_count;
-static uint16_t uart2_rx_read_index;
+volatile uint32_t uart2_rx_overflow_count;
+static volatile uint8_t uart2_rx_queue[UART2_RX_QUEUE_LEN];
+static volatile uint16_t uart2_rx_queue_read_index;
+static volatile uint16_t uart2_rx_queue_write_index;
 
 /**
   * @brief  USART2 GPIO引脚初始化配置
@@ -378,15 +381,20 @@ static void uart2_dma_config(void)
 	LL_DMA_DisableStream(DMA1, LL_DMA_STREAM_3);
 	LL_DMA_Init(DMA1, LL_DMA_STREAM_3, &DMA_InitStruct);
 
+	/* 清除 USART2 RX DMA 的历史标志，避免初始化后误触发中断 */
+	WRITE_REG(DMA1->LIFCR, DMA_LIFCR_CHTIF3 | DMA_LIFCR_CTCIF3 |
+	                       DMA_LIFCR_CTEIF3 | DMA_LIFCR_CDMEIF3 |
+	                       DMA_LIFCR_CFEIF3);
+
+	/* DMA中断配置：半传输和传输完成分别发布一个已完成的32字节半区 */
+	LL_DMA_EnableIT_HT(DMA1, LL_DMA_STREAM_3);
+	LL_DMA_EnableIT_TC(DMA1, LL_DMA_STREAM_3);
+	NVIC_SetPriority(DMA1_Stream3_IRQn, (6UL << 1) + 1UL);
+	NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+
 	/* 使能DMA发送/接收流 */
 //	LL_DMA_EnableStream(DMA1, LL_DMA_STREAM_2);
 	LL_DMA_EnableStream(DMA1, LL_DMA_STREAM_3);
-
-	/* DMA中断配置 */
-//	LL_DMA_DisableIT_TC(DMA1, LL_DMA_STREAM_2);  // 关闭TX DMA完成中断
-//	LL_DMA_EnableIT_TC(DMA1, LL_DMA_STREAM_3);   // 使能RX DMA完成中断
-//	NVIC_SetPriority(DMA1_Stream3_IRQn, 0);      // DMA接收中断优先级
-//	NVIC_EnableIRQ(DMA1_Stream3_IRQn);           // 使能DMA接收中断
 }
 
 /**
@@ -401,15 +409,56 @@ void uart2_init(uint32_t baudrate)
 	{
 		LL_USART_Disable(USART2);
 	}
-	uart2_rx_read_index = 0U;
+	uart2_rx_queue_read_index = 0U;
+	uart2_rx_queue_write_index = 0U;
 	uart2_rx_error_count = 0U;
+	uart2_rx_overflow_count = 0U;
 	memset((void *)ADDR_UART2_RX, 0, UART2_DMA_RX_LEN);
+	memset((void *)uart2_rx_queue, 0, sizeof(uart2_rx_queue));
 	uart2_gpio_config();   // 初始化串口GPIO
 	uart2_dma_config();    // 初始化串口DMA
 	uart2_config(baudrate);        // 初始化串口参数
 	uart2_rx.interrupt_count = 0;	//初始化中断计数器
 	uart2_rx.buffer_length = 0;		//初始化接收长度
 	uart2_rx.interrupt_flag = 0;	//初始化中断标志
+}
+static void uart2_commit_dma_block(uint16_t dma_offset)
+{
+	uint16_t i;
+	volatile uint8_t *dma_buffer = (volatile uint8_t *)ADDR_UART2_RX;
+
+	for (i = 0U; i < (UART2_DMA_RX_LEN / 2U); ++i)
+	{
+		uint16_t next_index;
+
+		next_index = (uint16_t)((uart2_rx_queue_write_index + 1U) &
+		                        (UART2_RX_QUEUE_LEN - 1U));
+		if (next_index == uart2_rx_queue_read_index)
+		{
+			++uart2_rx_overflow_count;
+			continue;
+		}
+
+		uart2_rx_queue[uart2_rx_queue_write_index] =
+			dma_buffer[dma_offset + i];
+		__DMB();
+		uart2_rx_queue_write_index = next_index;
+	}
+}
+
+void DMA1_Stream3_IRQHandler(void)
+{
+	if (LL_DMA_IsActiveFlag_HT3(DMA1) != 0U)
+	{
+		LL_DMA_ClearFlag_HT3(DMA1);
+		uart2_commit_dma_block(0U);
+	}
+
+	if (LL_DMA_IsActiveFlag_TC3(DMA1) != 0U)
+	{
+		LL_DMA_ClearFlag_TC3(DMA1);
+		uart2_commit_dma_block(UART2_DMA_RX_LEN / 2U);
+	}
 }
 
 uint8_t uart2_read_byte(uint8_t *data)
@@ -421,16 +470,17 @@ uint8_t uart2_read_byte(uint8_t *data)
 		return 0U;
 	}
 
-	write_index = (uint16_t)(UART2_DMA_RX_LEN -
-	                         LL_DMA_GetDataLength(DMA1, LL_DMA_STREAM_3));
-	if (uart2_rx_read_index == write_index)
+	write_index = uart2_rx_queue_write_index;
+	__DMB();
+	if (uart2_rx_queue_read_index == write_index)
 	{
 		return 0U;
 	}
 
-	*data = *(volatile uint8_t *)(ADDR_UART2_RX + uart2_rx_read_index);
-	uart2_rx_read_index = (uint16_t)((uart2_rx_read_index + 1U) &
-	                                 (UART2_DMA_RX_LEN - 1U));
+	*data = uart2_rx_queue[uart2_rx_queue_read_index];
+	uart2_rx_queue_read_index =
+		(uint16_t)((uart2_rx_queue_read_index + 1U) &
+		           (UART2_RX_QUEUE_LEN - 1U));
 	return 1U;
 }
 

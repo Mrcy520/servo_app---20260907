@@ -19,12 +19,15 @@
 #include "bsp_uart.h"
 #include "boot_jump.h"
 #include "gsa200.h"
+#include "gsa200_uart5.h"
 #include "j8_uart_test.h"
 #include "main.h"
 #include "pcu.h"
+#include "pcu_current_test.h"
 #include "pcu_position.h"
 #include "pcu_speed.h"
 #include "pcu_terminal.h"
+#include "waveform_uart7.h"
 
 __IO uint32_t u32_timer_1ms;
 __IO uint16_t u16_led_count;
@@ -85,6 +88,10 @@ int _write(int file, char *ptr, int len)
 
 int main(void)
 {
+  uint32_t waveform_last_control_update = 0U;
+  uint32_t waveform_last_current_test_update = 0U;
+  float waveform_values[WAVEFORM_UART7_CHANNEL_COUNT];
+
   VectorBase_Config();  // Configure the vector table base address.
   MPU_Config();         // 配合 D-Cache 使用
 	CPU_CACHE_Enable();		// Enable the i-Cache, d-Cache
@@ -93,13 +100,16 @@ int main(void)
 
 	LED_Init();
 
-  uart2_init(BAUDRATE_460800);
+  uart2_init(BAUDRATE_921600);
   gsa200_init();
+  gsa200_uart5_init(BAUDRATE_921600);
   uart3_init(BAUDRATE_921600);
   pcu_terminal_init();
   pcu_init(BAUDRATE_921600, PCU_DEFAULT_DEVICE_ID);
   pcu_position_init();
   pcu_speed_init();
+  /* Independent pure-current test mode initialization. */
+  pcu_current_test_init();
   uart7_init(BAUDRATE_921600);
   j8_uart_test_init();
 
@@ -114,9 +124,38 @@ int main(void)
 	while (1)
 	{
 		gsa200_poll(u32_timer_1ms);
+		gsa200_uart5_poll(u32_timer_1ms);
+
 		pcu_poll();
+		/* Pure current test mode owns the PCU current command when enabled. */
+		pcu_current_test_poll(u32_timer_1ms);
 		pcu_position_poll(u32_timer_1ms);
 		pcu_speed_poll(u32_timer_1ms);
+
+		/* UART7 九通道波形输出：每次速度环成功更新后发送一帧。 */
+		if ((pcu_speed_control_updates != waveform_last_control_update) ||
+		    (pcu_current_test_updates != waveform_last_current_test_update))
+		{
+			waveform_values[0] = pcu_current_test_is_active() != 0U ?
+			                      pcu_current_test_command_a :
+			                      pcu_speed_current_a;
+			waveform_values[1] = gsa200_gyro_x_dps;// 角速度原始值
+			waveform_values[2] = gsa200_gyro_x_corrected_dps;// 角速度校正值
+			waveform_values[3] = pcu_speed_gyro_rpm;// 角速度换算为转速
+			waveform_values[4] = pcu_speed_feedback_rpm;// 速度环反馈值
+			waveform_values[5] = 0.0f;
+			waveform_values[6] = 0.0f;
+			waveform_values[7] = 0.0f;
+			waveform_values[8] = 0.0f;
+
+			if (waveform_uart7_send9(waveform_values) ==
+			    WAVEFORM_UART7_OK)
+			{
+				waveform_last_control_update = pcu_speed_control_updates;
+				waveform_last_current_test_update = pcu_current_test_updates;
+			}
+		}
+
 		pcu_terminal_poll();
 		boot_poll();
 		j8_uart_test_poll(u32_timer_1ms);

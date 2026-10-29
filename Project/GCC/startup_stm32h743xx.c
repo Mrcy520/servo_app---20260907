@@ -26,6 +26,7 @@ void DebugMon_Handler(void) __attribute__((weak, alias("Default_Handler")));
 void PendSV_Handler(void) __attribute__((weak, alias("Default_Handler")));
 void SysTick_Handler(void) __attribute__((weak, alias("Default_Handler")));
 
+extern void DMA1_Stream3_IRQHandler(void);
 extern void USART1_IRQHandler(void);
 extern void USART2_IRQHandler(void);
 extern void USART3_IRQHandler(void);
@@ -51,6 +52,7 @@ const uintptr_t __vector_table[VECTOR_COUNT] = {
     [14] = (uintptr_t)PendSV_Handler,
     [15] = (uintptr_t)SysTick_Handler,
     [16 ... VECTOR_COUNT - 1U] = (uintptr_t)Default_Handler,
+    [16U + DMA1_Stream3_IRQn] = (uintptr_t)DMA1_Stream3_IRQHandler,
     [16U + USART1_IRQn] = (uintptr_t)USART1_IRQHandler,
     [16U + USART2_IRQn] = (uintptr_t)USART2_IRQHandler,
     [16U + USART3_IRQn] = (uintptr_t)USART3_IRQHandler,

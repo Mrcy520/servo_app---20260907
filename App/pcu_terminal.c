@@ -7,7 +7,9 @@
 #include <string.h>
 
 #include "bsp_uart.h"
+#include "gsa200.h"
 #include "pcu.h"
+#include "pcu_current_test.h"
 #include "pcu_position.h"
 #include "pcu_speed.h"
 #include "stm32h7xx_ll_cortex.h"
@@ -42,6 +44,8 @@ static void terminal_help(void)
     printf("  disable | stop       immediately disable PCU output\r\n");
     printf("  clear                clear PCU faults with output disabled\r\n");
     printf("  zero <raw>           start PCU automatic zeroing\r\n");
+    printf("  gyro bias start      measure X-axis gyro bias while stopped\r\n");
+    printf("  gyro status          show gyro and bias-calibration state\r\n");
     printf("  move <deg>           move relative to current angle\r\n");
     printf("  position status      show position-loop state\r\n");
     printf("  position end hold|disable  set action after reaching target\r\n");
@@ -49,6 +53,8 @@ static void terminal_help(void)
     printf("  position max_speed <rpm> set position speed limit\r\n");
     printf("  position stop        stop position move and disable output\r\n");
     printf("  speed set <rpm>      set speed-loop target\r\n");
+    printf("  speed feedback pcu|gyro  select speed feedback while stopped\r\n");
+    printf("  speed feedback status    show selected speed feedback\r\n");
     printf("  speed start|stop     start or stop speed loop\r\n");
     printf("  speed sine set <base> <amplitude> <Hz>\r\n");
     printf("  speed sine start|stop start or stop sine speed loop\r\n");
@@ -63,6 +69,38 @@ static uint32_t terminal_angle_mdeg(void)
 {
     return (uint32_t)(((uint64_t)g_pcu_status.angle_raw * 360000ULL) /
                       16777216ULL);
+}
+
+static const char *terminal_gyro_bias_state(void)
+{
+    switch (gsa200_bias_calibration_state)
+    {
+    case GSA200_BIAS_CALIBRATING:
+        return "calibrating";
+    case GSA200_BIAS_COMPLETE:
+        return "complete";
+    default:
+        return "not-started";
+    }
+}
+
+static void terminal_gyro_status(void)
+{
+    printf("gyro: valid=%u frames=%lu raw_x=%.6f dps corrected_x=%.6f dps\r\n",
+           (unsigned int)gsa200_data_valid,
+           (unsigned long)gsa200_valid_frames,
+           (double)gsa200_gyro_x_dps,
+           (double)gsa200_gyro_x_corrected_dps);
+    printf("gyro bias: state=%s samples=%lu/%lu bias_x=%.6f dps\r\n",
+           terminal_gyro_bias_state(),
+           (unsigned long)gsa200_bias_calibration_samples,
+           (unsigned long)GSA200_BIAS_CALIBRATION_SAMPLES,
+           (double)gsa200_gyro_x_bias_dps);
+    printf("gyro rx: checksum=%lu format=%lu dropped=%lu uart_overflow=%lu\r\n",
+           (unsigned long)gsa200_checksum_errors,
+           (unsigned long)gsa200_format_errors,
+           (unsigned long)gsa200_dropped_frames,
+           (unsigned long)uart2_rx_overflow_count);
 }
 
 static void terminal_status(void)
@@ -124,6 +162,13 @@ static void terminal_status(void)
            (double)pcu_speed_get_reference_rpm(),
            (double)pcu_speed_feedback_rpm,
            (double)pcu_speed_error_rpm);
+    printf("speed feedback: source=%s pcu_diff=%.3f rpm gyro=%.3f rpm pi_input=%.3f rpm age=%lu ms\r\n",
+           pcu_speed_get_feedback_source() == PCU_SPEED_FEEDBACK_GYRO ?
+           "gyro" : "pcu",
+           (double)pcu_speed_pcu_differential_rpm,
+           (double)pcu_speed_gyro_rpm,
+           (double)pcu_speed_feedback_rpm,
+           (unsigned long)pcu_speed_feedback_age_ms);
     printf("speed sine: active=%u base=%.3f rpm amplitude=%.3f rpm frequency=%.3f Hz\r\n",
            (unsigned int)pcu_speed_sine_is_active(),
            (double)pcu_speed_get_sine_base_rpm(),
@@ -140,6 +185,7 @@ static void terminal_status(void)
            (unsigned long)pcu_speed_control_updates,
            (unsigned long)pcu_speed_feedback_timeouts,
            (unsigned long)pcu_speed_command_errors);
+    terminal_gyro_status();
 }
 
 static uint8_t terminal_parse_setpoint(const char *text, int16_t *value)
@@ -312,6 +358,28 @@ static void terminal_execute(char *line)
     {
         terminal_status();
     }
+    else if (strcmp(line, "gyro status") == 0)
+    {
+        terminal_gyro_status();
+    }
+    else if (strcmp(line, "gyro bias start") == 0)
+    {
+        if ((pcu_speed_is_active() != 0U) ||
+            (pcu_position_is_active() != 0U) ||
+            ((g_pcu_status.status & PCU_STATUS_ENABLED) != 0U))
+        {
+            printf("ERR: stop and disable the motor before gyro bias calibration\r\n");
+        }
+        else if (gsa200_data_valid == 0U)
+        {
+            printf("ERR: no valid GSA200 data; calibration not started\r\n");
+        }
+        else
+        {
+            gsa200_start_bias_calibration();
+            printf("OK: gyro X-axis bias calibration started; keep motor still\r\n");
+        }
+    }
     else if (strcmp(line, "position status") == 0)
     {
         terminal_status();
@@ -374,6 +442,39 @@ static void terminal_execute(char *line)
     {
         terminal_status();
     }
+    else if (strcmp(line, "speed feedback status") == 0)
+    {
+        printf("speed feedback: source=%s pcu_diff=%.3f rpm gyro=%.3f rpm pi_input=%.3f rpm age=%lu ms\r\n",
+               pcu_speed_get_feedback_source() == PCU_SPEED_FEEDBACK_GYRO ?
+               "gyro" : "pcu",
+               (double)pcu_speed_pcu_differential_rpm,
+               (double)pcu_speed_gyro_rpm,
+               (double)pcu_speed_feedback_rpm,
+               (unsigned long)pcu_speed_feedback_age_ms);
+    }
+    else if (strcmp(line, "speed feedback pcu") == 0)
+    {
+        if (pcu_speed_set_feedback_source(
+                PCU_SPEED_FEEDBACK_PCU_DIFFERENTIAL) != 0U)
+        {
+            printf("OK: speed feedback source=pcu differential\r\n");
+        }
+        else
+        {
+            printf("ERR: stop all control and disable motor before changing feedback source\r\n");
+        }
+    }
+    else if (strcmp(line, "speed feedback gyro") == 0)
+    {
+        if (pcu_speed_set_feedback_source(PCU_SPEED_FEEDBACK_GYRO) != 0U)
+        {
+            printf("OK: speed feedback source=gyro; calibration is required before start\r\n");
+        }
+        else
+        {
+            printf("ERR: stop all control and disable motor before changing feedback source\r\n");
+        }
+    }
     else if (strcmp(line, "speed sine status") == 0)
     {
         terminal_status();
@@ -397,7 +498,17 @@ static void terminal_execute(char *line)
     }
     else if (strcmp(line, "speed sine start") == 0)
     {
-        if (pcu_speed_sine_start() != 0U)
+        if ((pcu_speed_get_feedback_source() == PCU_SPEED_FEEDBACK_GYRO) &&
+            (gsa200_bias_calibration_state != GSA200_BIAS_COMPLETE))
+        {
+            printf("ERR: gyro bias calibration is not complete\r\n");
+        }
+        else if ((pcu_speed_get_feedback_source() == PCU_SPEED_FEEDBACK_GYRO) &&
+                 (gsa200_data_valid == 0U))
+        {
+            printf("ERR: no valid gyro feedback\r\n");
+        }
+        else if (pcu_speed_sine_start() != 0U)
         {
             pcu_terminal_output_requested = 1U;
             printf("OK: sine speed loop started\r\n");
@@ -416,7 +527,17 @@ static void terminal_execute(char *line)
     }
     else if (strcmp(line, "speed start") == 0)
     {
-        if (pcu_speed_start() != 0U)
+        if ((pcu_speed_get_feedback_source() == PCU_SPEED_FEEDBACK_GYRO) &&
+            (gsa200_bias_calibration_state != GSA200_BIAS_COMPLETE))
+        {
+            printf("ERR: gyro bias calibration is not complete\r\n");
+        }
+        else if ((pcu_speed_get_feedback_source() == PCU_SPEED_FEEDBACK_GYRO) &&
+                 (gsa200_data_valid == 0U))
+        {
+            printf("ERR: no valid gyro feedback\r\n");
+        }
+        else if (pcu_speed_start() != 0U)
         {
             pcu_terminal_output_requested = 1U;
             printf("OK: speed loop started\r\n");
@@ -534,7 +655,11 @@ static void terminal_execute(char *line)
     }
     else if (strcmp(line, "enable") == 0)
     {
-        if ((pcu_position_is_active() != 0U) ||
+        if (pcu_current_test_is_enabled() != 0U)
+        {
+            printf("ERR: current test mode is active; disable it first\r\n");
+        }
+        else if ((pcu_position_is_active() != 0U) ||
             (pcu_speed_is_active() != 0U))
         {
             printf("ERR: position move is active; stop it before manual enable\r\n");
@@ -573,6 +698,16 @@ static void terminal_execute(char *line)
                  (pcu_speed_get_loop_mode() != PCU_LOOP_MODE_POSITION))
         {
             printf("ERR: speed loop is active; stop it before position move\r\n");
+        }
+        else if ((pcu_speed_get_feedback_source() == PCU_SPEED_FEEDBACK_GYRO) &&
+                 (gsa200_bias_calibration_state != GSA200_BIAS_COMPLETE))
+        {
+            printf("ERR: gyro bias calibration is not complete\r\n");
+        }
+        else if ((pcu_speed_get_feedback_source() == PCU_SPEED_FEEDBACK_GYRO) &&
+                 (gsa200_data_valid == 0U))
+        {
+            printf("ERR: no valid gyro feedback\r\n");
         }
         else if (pcu_position_start_relative(angle) == 0U)
         {

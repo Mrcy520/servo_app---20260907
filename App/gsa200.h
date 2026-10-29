@@ -3,6 +3,15 @@
 
 #include <stdint.h>
 
+#define GSA200_BIAS_CALIBRATION_SAMPLES (2000U)
+
+typedef enum
+{
+    GSA200_BIAS_NOT_STARTED = 0U,
+    GSA200_BIAS_CALIBRATING = 1U,
+    GSA200_BIAS_COMPLETE = 2U
+} gsa200_bias_state_t;
+
 typedef struct
 {
     float gyro_dps[3];
@@ -25,6 +34,8 @@ extern volatile gsa200_data_t g_gsa200;
 extern volatile float gsa200_gyro_x_dps;
 extern volatile float gsa200_gyro_y_dps;
 extern volatile float gsa200_gyro_z_dps;
+extern volatile float gsa200_gyro_x_bias_dps;
+extern volatile float gsa200_gyro_x_corrected_dps;
 extern volatile float gsa200_angle_x_deg;
 extern volatile float gsa200_angle_y_deg;
 extern volatile float gsa200_angle_z_deg;
@@ -33,6 +44,9 @@ extern volatile float gsa200_accel_y_g;
 extern volatile float gsa200_accel_z_g;
 extern volatile float gsa200_temperature_c;
 extern volatile uint32_t gsa200_sample_counter;
+extern volatile uint32_t gsa200_bias_calibration_samples;
+extern volatile uint8_t gsa200_bias_calibration_done;
+extern volatile gsa200_bias_state_t gsa200_bias_calibration_state;
 extern volatile uint32_t gsa200_valid_frames;
 extern volatile uint32_t gsa200_checksum_errors;
 extern volatile uint32_t gsa200_format_errors;
@@ -47,8 +61,23 @@ extern volatile uint32_t gsa200_frame_word4;
 extern volatile uint32_t gsa200_frame_word5;
 extern volatile uint32_t gsa200_frame_word6;
 extern volatile uint32_t gsa200_frame_word7;
+extern volatile uint32_t gsa200_last_calculated_checksum;
+extern volatile uint32_t gsa200_last_received_checksum;
+extern volatile uint32_t gsa200_last_xor_checksum;
+extern volatile uint32_t gsa200_last_payload_checksum;
+extern volatile uint32_t gsa200_last_sum_high_byte;
+extern volatile uint32_t gsa200_failed_frame_captured;
+extern volatile uint32_t gsa200_failed_frame_word0;
+extern volatile uint32_t gsa200_failed_frame_word1;
+extern volatile uint32_t gsa200_failed_frame_word2;
+extern volatile uint32_t gsa200_failed_frame_word3;
+extern volatile uint32_t gsa200_failed_frame_word4;
+extern volatile uint32_t gsa200_failed_frame_word5;
+extern volatile uint32_t gsa200_failed_frame_word6;
+extern volatile uint32_t gsa200_failed_frame_word7;
 
 void gsa200_init(void);
 void gsa200_poll(uint32_t now_ms);
+void gsa200_start_bias_calibration(void);
 
 #endif /* __GSA200_H__ */

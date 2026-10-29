@@ -28,7 +28,8 @@
 #define UART_RX_PACKET_MAX_LEN (255U)
 
 #define UART1_DMA_RX_LEN UART_RX_PACKET_MAX_LEN
-#define UART2_DMA_RX_LEN (256U)
+#define UART2_DMA_RX_LEN (64U)
+#define UART2_RX_QUEUE_LEN (2048U)
 #define UART3_DMA_RX_LEN UART_RX_PACKET_MAX_LEN
 #define UART4_DMA_RX_LEN UART_RX_PACKET_MAX_LEN
 #define UART5_DMA_RX_LEN UART_RX_PACKET_MAX_LEN
@@ -40,7 +41,7 @@
 #define ADDR_UART1_TX         (0x3001F000U)    //发送buffer
 #define ADDR_UART1_RX         (0x3001F100U)    //接收buffer
 #define ADDR_UART2_TX         (0x3001F200U)    //发送buffer
-#define ADDR_UART2_RX         (0x3001F300U)    //接收buffer
+#define ADDR_UART2_RX         (0x30020000U)    //接收buffer，SRAM2中独立的DMA区域
 #define ADDR_UART3_TX         (0x3001F400U)    //发送buffer
 #define ADDR_UART3_RX         (0x3001F500U)    //接收buffer
 #define ADDR_UART4_TX         (0x3001F600U)    //发送buffer
@@ -75,6 +76,7 @@ extern uint8_t uart1_transmit(const uint8_t u8_data[], uint8_t u8_length);
 
 extern volatile uart_receive_packet_t uart2_rx;
 extern volatile uint32_t uart2_rx_error_count;
+extern volatile uint32_t uart2_rx_overflow_count;
 extern void uart2_init(uint32_t baudrate);
 extern uint8_t uart2_read_byte(uint8_t *data);
 extern uint8_t uart2_transmit(const uint8_t u8_data[], uint8_t u8_length);

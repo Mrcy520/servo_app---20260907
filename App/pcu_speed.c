@@ -2,7 +2,9 @@
 
 #include <math.h>
 
+#include "gsa200.h"
 #include "pcu.h"
+#include "pcu_current_test.h"
 #include "pcu_position.h"
 
 #define PCU_SPEED_LOOP_PERIOD_MS       (1U)
@@ -25,6 +27,9 @@
                               PCU_STATUS_BUS_UNDERVOLT | PCU_STATUS_BUS_OVERVOLT)
 
 volatile float pcu_speed_feedback_rpm;
+volatile float pcu_speed_pcu_differential_rpm;
+volatile float pcu_speed_gyro_rpm;
+volatile uint32_t pcu_speed_feedback_age_ms;
 volatile float pcu_speed_error_rpm;
 volatile float pcu_speed_reference_rpm;
 volatile float pcu_speed_current_a;
@@ -45,14 +50,19 @@ static float sine_frequency_hz;
 static float sine_phase_rad;
 static float position_reference_rpm;
 static float integral_a;
-static uint32_t last_frame_count;
+static uint32_t last_pcu_frame_count;
+static uint32_t last_gyro_frame_count;
 static uint32_t last_angle_raw;
-static uint32_t last_feedback_ms;
+static uint32_t last_pcu_feedback_ms;
+static uint32_t last_gyro_feedback_ms;
+static uint32_t feedback_wait_start_ms;
 static uint32_t last_control_ms;
-static uint8_t feedback_initialized;
+static uint8_t pcu_feedback_initialized;
+static uint8_t gyro_feedback_initialized;
 static uint8_t schedule_initialized;
 static uint8_t sine_active;
 static pcu_loop_mode_t loop_mode;
+static pcu_speed_feedback_source_t feedback_source;
 
 static float clamp_float(float value, float low, float high)
 {
@@ -96,11 +106,18 @@ static int16_t normalized_to_raw(float output_norm)
 
 static void speed_reset_measurement(void)
 {
-    last_frame_count = g_pcu_status.valid_frames;
+    last_pcu_frame_count = g_pcu_status.valid_frames;
+    last_gyro_frame_count = gsa200_valid_frames;
     last_angle_raw = g_pcu_status.angle_raw;
-    last_feedback_ms = 0U;
-    feedback_initialized = 0U;
+    last_pcu_feedback_ms = 0U;
+    last_gyro_feedback_ms = 0U;
+    feedback_wait_start_ms = 0U;
+    pcu_feedback_initialized = 0U;
+    gyro_feedback_initialized = 0U;
     pcu_speed_feedback_rpm = 0.0f;
+    pcu_speed_pcu_differential_rpm = 0.0f;
+    pcu_speed_gyro_rpm = 0.0f;
+    pcu_speed_feedback_age_ms = 0U;
     pcu_speed_error_rpm = 0.0f;
 }
 
@@ -119,7 +136,7 @@ static void speed_fail(pcu_speed_state_t state)
     speed_state = state;
 }
 
-static void speed_update_feedback_with_time(uint32_t now_ms)
+static void speed_update_pcu_feedback(uint32_t now_ms)
 {
     uint32_t frame_count = g_pcu_status.valid_frames;
     uint32_t frame_delta;
@@ -127,15 +144,15 @@ static void speed_update_feedback_with_time(uint32_t now_ms)
     uint32_t dt_ms;
     int32_t delta_raw;
 
-    if (frame_count == last_frame_count)
+    if (frame_count == last_pcu_frame_count)
     {
         return;
     }
 
     angle_raw = g_pcu_status.angle_raw;
-    frame_delta = frame_count - last_frame_count;
-    dt_ms = feedback_initialized != 0U ? (now_ms - last_feedback_ms) :
-                                         PCU_SPEED_FEEDBACK_PERIOD_MS;
+    frame_delta = frame_count - last_pcu_frame_count;
+    dt_ms = pcu_feedback_initialized != 0U ?
+            (now_ms - last_pcu_feedback_ms) : PCU_SPEED_FEEDBACK_PERIOD_MS;
     if (dt_ms == 0U)
     {
         dt_ms = PCU_SPEED_FEEDBACK_PERIOD_MS;
@@ -147,19 +164,72 @@ static void speed_update_feedback_with_time(uint32_t now_ms)
         dt_ms = frame_delta * PCU_SPEED_FEEDBACK_PERIOD_MS;
     }
 
-    last_frame_count = frame_count;
-    last_feedback_ms = now_ms;
-    if (feedback_initialized == 0U)
+    last_pcu_frame_count = frame_count;
+    last_pcu_feedback_ms = now_ms;
+    if (pcu_feedback_initialized == 0U)
     {
         last_angle_raw = angle_raw;
-        feedback_initialized = 1U;
+        pcu_feedback_initialized = 1U;
         return;
     }
 
     delta_raw = signed_angle_delta(angle_raw, last_angle_raw);
     last_angle_raw = angle_raw;
-    pcu_speed_feedback_rpm = ((float)delta_raw * 60000.0f) /
-                             (PCU_SPEED_ANGLE_COUNTS * (float)dt_ms);
+    pcu_speed_pcu_differential_rpm = ((float)delta_raw * 60000.0f) /
+                                     (PCU_SPEED_ANGLE_COUNTS * (float)dt_ms);
+}
+
+static void speed_update_gyro_feedback(uint32_t now_ms)
+{
+    uint32_t frame_count = gsa200_valid_frames;
+    float gyro_rpm;
+
+    if (frame_count == last_gyro_frame_count)
+    {
+        return;
+    }
+
+    last_gyro_frame_count = frame_count;
+    if ((gsa200_data_valid == 0U) ||
+        (gsa200_bias_calibration_state != GSA200_BIAS_COMPLETE) ||
+        !isfinite(gsa200_gyro_x_corrected_dps))
+    {
+        return;
+    }
+
+    gyro_rpm = gsa200_gyro_x_corrected_dps / 6.0f;
+    if (!isfinite(gyro_rpm))
+    {
+        return;
+    }
+
+    pcu_speed_gyro_rpm = gyro_rpm;
+    last_gyro_feedback_ms = now_ms;
+    gyro_feedback_initialized = 1U;
+}
+
+static uint8_t speed_select_feedback(uint32_t now_ms)
+{
+    if (feedback_source == PCU_SPEED_FEEDBACK_GYRO)
+    {
+        if (gyro_feedback_initialized == 0U)
+        {
+            return 0U;
+        }
+        pcu_speed_feedback_rpm = pcu_speed_gyro_rpm;
+        pcu_speed_feedback_age_ms = now_ms - last_gyro_feedback_ms;
+    }
+    else
+    {
+        if (pcu_feedback_initialized == 0U)
+        {
+            return 0U;
+        }
+        pcu_speed_feedback_rpm = pcu_speed_pcu_differential_rpm;
+        pcu_speed_feedback_age_ms = now_ms - last_pcu_feedback_ms;
+    }
+
+    return (uint8_t)isfinite(pcu_speed_feedback_rpm);
 }
 
 static void speed_run_pi(uint32_t dt_ms)
@@ -195,18 +265,18 @@ static void speed_run_pi(uint32_t dt_ms)
     unsaturated = kp_a_per_rpm * error + candidate_integral;
     max_a = max_current_a;
     output_a = clamp_float(unsaturated, -max_a, max_a);
-    saturated = (uint8_t)(output_a != unsaturated);
+    // saturated = (uint8_t)(output_a != unsaturated);
 
-    /* Conditional integration prevents windup while allowing the integral to
-       unwind when the speed error points back into the available range. */
-    if ((saturated == 0U) ||
-        ((unsaturated > max_a) && (error < 0.0f)) ||
-        ((unsaturated < -max_a) && (error > 0.0f)))
-    {
-        integral_a = clamp_float(candidate_integral, -max_a, max_a);
-        unsaturated = kp_a_per_rpm * error + integral_a;
-        output_a = clamp_float(unsaturated, -max_a, max_a);
-    }
+    // /* Conditional integration prevents windup while allowing the integral to
+    //    unwind when the speed error points back into the available range. */
+    // if ((saturated == 0U) ||
+    //     ((unsaturated > max_a) && (error < 0.0f)) ||
+    //     ((unsaturated < -max_a) && (error > 0.0f)))
+    // {
+    //     integral_a = clamp_float(candidate_integral, -max_a, max_a);
+    //     unsaturated = kp_a_per_rpm * error + integral_a;
+    //     output_a = clamp_float(unsaturated, -max_a, max_a);
+    // }
 
     pcu_speed_error_rpm = error;
     pcu_speed_current_a = output_a;
@@ -225,6 +295,7 @@ void pcu_speed_init(void)
     position_reference_rpm = 0.0f;
     sine_active = 0U;
     loop_mode = PCU_LOOP_MODE_NONE;
+    feedback_source = PCU_SPEED_FEEDBACK_PCU_DIFFERENTIAL;
     kp_a_per_rpm = PCU_SPEED_DEFAULT_KP_A_PER_RPM;
     ki_a_per_rpm_s = PCU_SPEED_DEFAULT_KI_A_PER_RPM_S;
     max_current_a = PCU_SPEED_DEFAULT_MAX_CURRENT_A;
@@ -242,9 +313,22 @@ void pcu_speed_init(void)
 
 static uint8_t speed_start_internal(uint8_t sine_mode, pcu_loop_mode_t mode)
 {
+    if (pcu_current_test_is_enabled() != 0U)
+    {
+        return 0U;
+    }
+
     if ((g_pcu_status.data_valid == 0U) ||
         ((g_pcu_status.status & PCU_SPEED_FAULT_MASK) != 0U) ||
         (max_current_a <= 0.0f) || !isfinite(max_current_a))
+    {
+        return 0U;
+    }
+
+    if ((feedback_source == PCU_SPEED_FEEDBACK_GYRO) &&
+        ((gsa200_bias_calibration_state != GSA200_BIAS_COMPLETE) ||
+         (gsa200_data_valid == 0U) ||
+         !isfinite(gsa200_gyro_x_corrected_dps)))
     {
         return 0U;
     }
@@ -344,7 +428,7 @@ void pcu_speed_poll(uint32_t now_ms)
     if (schedule_initialized == 0U)
     {
         last_control_ms = now_ms;
-        last_feedback_ms = now_ms;
+        feedback_wait_start_ms = now_ms;
         schedule_initialized = 1U;
         return;
     }
@@ -355,8 +439,30 @@ void pcu_speed_poll(uint32_t now_ms)
     }
     last_control_ms = now_ms;
 
-    speed_update_feedback_with_time(now_ms);
-    if ((uint32_t)(now_ms - last_feedback_ms) >= PCU_SPEED_FEEDBACK_TIMEOUT_MS)
+    speed_update_pcu_feedback(now_ms);
+    speed_update_gyro_feedback(now_ms);
+
+    if ((feedback_source == PCU_SPEED_FEEDBACK_GYRO) &&
+        ((gsa200_bias_calibration_state != GSA200_BIAS_COMPLETE) ||
+         (gsa200_data_valid == 0U)))
+    {
+        pcu_speed_feedback_timeouts++;
+        speed_fail(PCU_SPEED_TIMEOUT);
+        return;
+    }
+
+    if (speed_select_feedback(now_ms) == 0U)
+    {
+        if ((uint32_t)(now_ms - feedback_wait_start_ms) >=
+            PCU_SPEED_FEEDBACK_TIMEOUT_MS)
+        {
+            pcu_speed_feedback_timeouts++;
+            speed_fail(PCU_SPEED_TIMEOUT);
+        }
+        return;
+    }
+
+    if (pcu_speed_feedback_age_ms >= PCU_SPEED_FEEDBACK_TIMEOUT_MS)
     {
         pcu_speed_feedback_timeouts++;
         speed_fail(PCU_SPEED_TIMEOUT);
@@ -438,6 +544,24 @@ uint8_t pcu_speed_set_max_current(float value)
     return 1U;
 }
 
+uint8_t pcu_speed_set_feedback_source(pcu_speed_feedback_source_t source)
+{
+    if (((source != PCU_SPEED_FEEDBACK_PCU_DIFFERENTIAL) &&
+         (source != PCU_SPEED_FEEDBACK_GYRO)) ||
+        (pcu_speed_is_active() != 0U) ||
+        (pcu_position_is_active() != 0U) ||
+        ((g_pcu_status.status & PCU_STATUS_ENABLED) != 0U))
+    {
+        return 0U;
+    }
+
+    feedback_source = source;
+    integral_a = 0.0f;
+    schedule_initialized = 0U;
+    speed_reset_measurement();
+    return 1U;
+}
+
 float pcu_speed_get_kp(void)
 {
     return kp_a_per_rpm;
@@ -451,6 +575,11 @@ float pcu_speed_get_ki(void)
 float pcu_speed_get_max_current(void)
 {
     return max_current_a;
+}
+
+pcu_speed_feedback_source_t pcu_speed_get_feedback_source(void)
+{
+    return feedback_source;
 }
 
 pcu_speed_state_t pcu_speed_get_state(void)

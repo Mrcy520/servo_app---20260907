@@ -1137,6 +1137,12 @@
         <file>
             <name>$PROJ_DIR$\..\..\App\boot_jump.c</name>
         </file>
+        <file>
+            <name>$PROJ_DIR$\..\..\App\gsa200_uart5.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\..\..\App\waveform_uart7.c</name>
+        </file>
     </group>
     <group>
         <name>Bsp</name>
