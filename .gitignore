@@ -1,5 +1,12 @@
-build
-mx.scratch
-!.settings
+# 构建产物
+build/
 
+# Python
+__pycache__/
+*.py[cod]
+*.log
+
+# IDE / 本地工作区数据
 .workbuddy/
+.vs/
+.vscode/
