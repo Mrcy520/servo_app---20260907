@@ -417,7 +417,7 @@ static void CommProto_ServiceParamRsp(void)
     /* 与中断侧的投递互斥；临界区只有结构体拷贝，极短 */
     primask = __get_PRIMASK();
     __disable_irq();
-    rsp = s_rsp_mailbox;
+    rsp           = s_rsp_mailbox;
     s_rsp_pending = 0u;
     if (primask == 0u) {
         __enable_irq();
@@ -430,7 +430,7 @@ static void CommProto_ServiceParamRsp(void)
 
 uint8_t CommProto_Send(const uint8_t* buf, uint8_t len)
 {
-    uint8_t  slot;
+    uint8_t slot;
     uint32_t primask;
 
     if (len > TX_MAX_LEN) {

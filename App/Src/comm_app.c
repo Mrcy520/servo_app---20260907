@@ -24,8 +24,8 @@
 
 /* 掉电保存的参数范围：参数协议表 3-1 中所有"读写"项 0x01~0x0B ------------
  * 0x0C 固件版本、0x0D 协议版本是只读常量，由固件生成，不参与存储。 */
-#define PARAM_STORE_BASE PI_POLE_PAIRS    /* 0x01 */
-#define PARAM_STORE_LAST PI_COMM_TIMEOUT  /* 0x0B */
+#define PARAM_STORE_BASE PI_POLE_PAIRS   /* 0x01 */
+#define PARAM_STORE_LAST PI_COMM_TIMEOUT /* 0x0B */
 #define PARAM_STORE_N    (uint8_t)(PARAM_STORE_LAST - PARAM_STORE_BASE + 1u)
 #define PARAM_STORE_LEN  (uint16_t)(PARAM_STORE_N * 4u) /* 11 × 4 = 44 字节 */
 
@@ -48,15 +48,14 @@ static uint32_t s_zero_tick;
 static int16_t s_zero_voltage;
 
 /* 掉电保存状态 ------------------------------------------------------------ */
-static uint8_t s_nvm_dirty;                    /* 有参数变化待落盘 */
-static uint8_t s_nvm_loaded;                   /* 本次上电确实从 Flash 恢复了参数 */
-static uint32_t s_nvm_tick;                    /* 上次写盘时刻（节流） */
-static uint8_t s_nvm_snap[PARAM_STORE_LEN];    /* 已落盘内容快照，用于"内容未变不重写" */
+static uint8_t s_nvm_dirty;                 /* 有参数变化待落盘 */
+static uint8_t s_nvm_loaded;                /* 本次上电确实从 Flash 恢复了参数 */
+static uint32_t s_nvm_tick;                 /* 上次写盘时刻（节流） */
+static uint8_t s_nvm_snap[PARAM_STORE_LEN]; /* 已落盘内容快照，用于"内容未变不重写" */
 
 /* 保护类状态位集合（不含使能回读/通讯超时/故障锁存） */
-#define ST_FAULT_MASK                                                        \
-    ((uint8_t)(ST_ANGLE_ERR | ST_OVER_CUR | ST_OVER_VOLT | ST_UNDER_VOLT |    \
-               ST_OVER_TEMP))
+#define ST_FAULT_MASK \
+    ((uint8_t)(ST_ANGLE_ERR | ST_OVER_CUR | ST_OVER_VOLT | ST_UNDER_VOLT | ST_OVER_TEMP))
 
 #define PARAM_MASK_BIT(idx) ((uint32_t)1u << (uint32_t)(idx))
 
@@ -198,8 +197,7 @@ uint8_t CommApp_OnControlFrame(const ctrl_down_t* c)
     }
 
     /* 7) 使能门控：故障锁存期间不接受使能，须先由主控下发 bit1 清故障 */
-    enable = (uint8_t)(((ctrl & CW_ENABLE) != 0u) &&
-                       ((g_status.status & ST_FAULT_LATCH) == 0u));
+    enable = (uint8_t)(((ctrl & CW_ENABLE) != 0u) && ((g_status.status & ST_FAULT_LATCH) == 0u));
     if (enable != 0u) {
         g_control.ctrl |= CW_ENABLE;
         g_status.status |= ST_ENABLED;
@@ -472,7 +470,7 @@ static void CommApp_NvmRestore(void)
     }
 
     for (i = 0u; i < PARAM_STORE_N; i++) {
-        uint8_t idx = (uint8_t)(PARAM_STORE_BASE + i);
+        uint8_t idx      = (uint8_t)(PARAM_STORE_BASE + i);
         const uint8_t* p = &buf[(uint16_t)i * 4u];
         int32_t v = (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
                               ((uint32_t)p[3] << 24));

@@ -28,8 +28,8 @@
 /* USER CODE BEGIN Includes */
 
 #include <stdio.h>
-#include "comm_app.h"  /* 应用层入口；协议层位于 Utility/comm_proto.h */
-#include "fpga_app.h"  /* FPGA 执行器映射；链路层位于 Utility/fpga_link.h */
+#include "comm_app.h"   /* 应用层入口；协议层位于 Utility/comm_proto.h */
+#include "fpga_app.h"   /* FPGA 执行器映射；链路层位于 Utility/fpga_link.h */
 #include "dbg_report.h" /* 调试上报：COMM_DEBUG_REPORT=1 时输出文本日志 */
 
 /* USER CODE END Includes */
