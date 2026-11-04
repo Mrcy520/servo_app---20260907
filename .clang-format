@@ -1,0 +1,58 @@
+# =========================
+# Keil / Embedded C & C++
+# Google-like clang-format
+# =========================
+
+BasedOnStyle: Google
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 8
+
+# Line width / braces
+ColumnLimit: 100
+BreakBeforeBraces: Linux
+
+# Short statements
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: true
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+
+# Switch / include
+IndentCaseLabels: true
+SortIncludes: false
+
+# Alignment
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveMacros: Consecutive
+AlignTrailingComments: true
+
+# Pointer / reference style
+PointerAlignment: Left
+DerivePointerAlignment: false
+
+# Empty lines
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+---
+Language: C
+
+# C only
+IndentPPDirectives: None
+
+---
+Language: Cpp
+
+# C++ only
+NamespaceIndentation: All
+AccessModifierOffset: -2
+BreakBeforeBinaryOperators: NonAssignment
+ConstructorInitializerIndentWidth: 4
+BreakConstructorInitializers: BeforeColon
+AlwaysBreakTemplateDeclarations: Yes
+LambdaBodyIndentation: Signature
+ReferenceAlignment: Left

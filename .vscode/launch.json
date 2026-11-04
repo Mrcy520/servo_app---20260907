@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ARM Debug (OpenOCD)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "executable": "build/Debug/Motor_Prj.elf",
+            "servertype": "openocd",
+            "configFiles": [
+                "interface/stlink-v2.cfg",
+                "target/stm32f3x.cfg"
+            ],
+            "device": "STM32F302K8",
+            "runToEntryPoint": "main",
+            "serverpath": "D:/Sys_Path/OpenOCD/bin/openocd.exe",
+            "armToolchainPath": "D:/Sys_Path/arm-none-eabi-gcc/bin"
+        }
+    ]
+}
