@@ -11,3 +11,6 @@ __pycache__/
 .vs/
 .vscode/
 dist/
+
+# Office 临时锁文件
+~$*
