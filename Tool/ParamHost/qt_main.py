@@ -13,6 +13,7 @@
 import os
 import subprocess
 import sys
+import time
 
 PROBE_FULL = "import sys, PySide6, serial; print(sys.executable)"
 PROBE_QT = "import sys, PySide6; print(sys.executable)"
@@ -20,6 +21,8 @@ PROBE_QT = "import sys, PySide6; print(sys.executable)"
 
 def _self_heal():
     """当前解释器缺 PySide6 / pyserial 时，自动换一个具备依赖的解释器重启。"""
+    if getattr(sys, "frozen", False):      # 打包成 exe 后依赖已内置，无需自愈
+        return False
     if os.environ.get("MPH_RELAUNCH") or sys.platform != "win32":
         return False
 
@@ -143,5 +146,35 @@ def main():
     return app.exec()
 
 
+def _write_crash_log(exc_text):
+    """打包成窗口程序后没有控制台，异常必须落文件，否则只能看到'闪退'。"""
+    try:
+        base = os.environ.get("TEMP") or os.path.expanduser("~")
+        path = os.path.join(base, "MotorParamHost_error.log")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S\n"))
+            f.write("argv: %r\n" % (sys.argv,))
+            f.write("frozen: %r\n\n" % (getattr(sys, "frozen", False),))
+            f.write(exc_text)
+        return path
+    except Exception:
+        return None
+
+
+def _excepthook(exc_type, exc_value, exc_tb):
+    import traceback
+    _write_crash_log("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.excepthook = _excepthook
+    try:
+        code = main()
+    except SystemExit:
+        raise
+    except BaseException:
+        import traceback
+        path = _write_crash_log(traceback.format_exc())
+        sys.stderr.write("启动失败，详见 %s\n" % path)
+        code = 3
+    sys.exit(code)
