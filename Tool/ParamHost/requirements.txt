@@ -1,0 +1,17 @@
+# 驱动板参数上位机 · 运行依赖
+# 安装：py -3 -m pip install -r requirements.txt
+# 本机已验证组合：Python 3.12.9 / PySide6 6.12.0 / qfluentwidgets 1.11.3 / pyserial 3.5
+
+# 串口通信（协议层与链路层必需）
+pyserial>=3.5
+
+# Qt6 界面（必需）
+PySide6>=6.5
+
+# Fluent 风格组件库（可选；缺失时 fluent.py 自动降级为原生控件 + QSS）
+PySide6-Fluent-Widgets>=1.11.0
+
+# 说明：
+# 1) 库名是 PySide6-Fluent-Widgets（PySideSix-* 不存在），装好后 import 名是 qfluentwidgets
+# 2) 该库会连带安装 PySideSix-Frameless-Window、darkdetect，无需单列
+# 3) Tkinter 后备版（host_gui.py）需要标准库 tkinter，官方 python.org 安装包自带

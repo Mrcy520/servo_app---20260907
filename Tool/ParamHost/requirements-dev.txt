@@ -1,0 +1,8 @@
+# 驱动板参数上位机 · 打包依赖（仅生成单文件 exe 时需要）
+# 安装：py -3 -m pip install -r requirements-dev.txt
+# 本机已验证：pyinstaller 6.22.3
+
+pyinstaller>=6.10
+
+# 说明：打包前先装运行依赖 requirements.txt；
+#       build_exe.bat 会自动检测并安装缺失项。
