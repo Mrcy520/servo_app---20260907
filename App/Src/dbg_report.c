@@ -46,9 +46,9 @@
 /* -------------------------------------------------------------------------- */
 /* 内部状态                                                                    */
 /* -------------------------------------------------------------------------- */
-static ctrl_up_t   s_up; /* 每轮从 CommApp_BuildUpFrame 取最新值 */
+static ctrl_up_t s_up; /* 每轮从 CommApp_BuildUpFrame 取最新值 */
 static ctrl_down_t s_dn;
-static fpga_rx_t   s_fp;
+static fpga_rx_t s_fp;
 static param_frame_t s_req;
 static param_frame_t s_rsp;
 
@@ -67,10 +67,10 @@ static uint32_t s_ang_tick;  /* 上次角度采样时刻（独立节拍，不受
 /* 角度 raw 的上电以来极值：用于判断"是换算错还是行程就这样" */
 static uint32_t s_ang_min;
 static uint32_t s_ang_max;
-static uint8_t  s_ang_seen;
-static uint8_t  s_evt;       /* 有事件待打印 */
-static uint8_t  s_dn_evt;    /* 本次事件由"收到新下行帧"引起，才打印 [DN] */
-static uint8_t  s_pr_evt;    /* 有参数读写事件待打印 */
+static uint8_t s_ang_seen;
+static uint8_t s_evt;    /* 有事件待打印 */
+static uint8_t s_dn_evt; /* 本次事件由"收到新下行帧"引起，才打印 [DN] */
+static uint8_t s_pr_evt; /* 有参数读写事件待打印 */
 
 static uint8_t s_prev_st;   /* 上行状态位变化检测 */
 static uint8_t s_prev_ctrl; /* 下行控制字变化检测 */
@@ -136,41 +136,62 @@ static const char* Dbg_ModeName(uint8_t mode)
 static const char* Dbg_ParamName(uint8_t idx)
 {
     switch (idx) {
-        case PI_POLE_PAIRS: return "POLE";
-        case PI_MOTOR_DIR: return "MDIR";
-        case PI_ENC_DIR: return "EDIR";
-        case PI_IQ_KP: return "KP_Q";
-        case PI_IQ_KI: return "KI_Q";
-        case PI_ID_KP: return "KP_D";
-        case PI_ID_KI: return "KI_D";
-        case PI_ZERO_POS: return "ZERO";
-        case PI_V_GAIN: return "VGAIN";
-        case PI_V_LIMIT: return "VLIM";
-        case PI_COMM_TIMEOUT: return "TMOUT";
-        case PI_FW_VERSION: return "FWVER";
-        case PI_PROTO_VER: return "PROTO";
-        default: return "?";
+        case PI_POLE_PAIRS:
+            return "POLE";
+        case PI_MOTOR_DIR:
+            return "MDIR";
+        case PI_ENC_DIR:
+            return "EDIR";
+        case PI_IQ_KP:
+            return "KP_Q";
+        case PI_IQ_KI:
+            return "KI_Q";
+        case PI_ID_KP:
+            return "KP_D";
+        case PI_ID_KI:
+            return "KI_D";
+        case PI_ZERO_POS:
+            return "ZERO";
+        case PI_V_GAIN:
+            return "VGAIN";
+        case PI_V_LIMIT:
+            return "VLIM";
+        case PI_COMM_TIMEOUT:
+            return "TMOUT";
+        case PI_FW_VERSION:
+            return "FWVER";
+        case PI_PROTO_VER:
+            return "PROTO";
+        default:
+            return "?";
     }
 }
 
 static const char* Dbg_ParamStatusName(uint8_t st)
 {
     switch (st) {
-        case PARAM_ST_OK: return "OK";
-        case PARAM_ST_UNKNOWN: return "BAD_CMD";
-        case PARAM_ST_RANGE: return "RANGE";
-        case PARAM_ST_INDEX: return "BAD_IDX";
-        case PARAM_ST_CRC: return "CRC";
-        case PARAM_ST_READONLY: return "READONLY";
-        default: return "?";
+        case PARAM_ST_OK:
+            return "OK";
+        case PARAM_ST_UNKNOWN:
+            return "BAD_CMD";
+        case PARAM_ST_RANGE:
+            return "RANGE";
+        case PARAM_ST_INDEX:
+            return "BAD_IDX";
+        case PARAM_ST_CRC:
+            return "CRC";
+        case PARAM_ST_READONLY:
+            return "READONLY";
+        default:
+            return "?";
     }
 }
 
 /* 百分比设定值：±32767 对应 ±100.00% */
 static void Dbg_AddPct(log_line_t* ln, int16_t ref)
 {
-    int32_t c    = ((int32_t)ref * 10000) / 32767; /* 0.01 % */
-    char    sign = (c < 0) ? '-' : '+';
+    int32_t c = ((int32_t)ref * 10000) / 32767; /* 0.01 % */
+    char sign = (c < 0) ? '-' : '+';
 
     if (c < 0) {
         c = -c;
@@ -189,8 +210,8 @@ static void Dbg_AddAngle24(log_line_t* ln, uint32_t ang24)
 /* 上行电流：Int16 对应 0.01 A */
 static void Dbg_AddCurrent16(log_line_t* ln, int16_t iq)
 {
-    int32_t v    = (int32_t)iq;
-    char    sign = (v < 0) ? '-' : '+';
+    int32_t v = (int32_t)iq;
+    char sign = (v < 0) ? '-' : '+';
 
     if (v < 0) {
         v = -v;
@@ -203,8 +224,7 @@ static void Dbg_AddVbus8(log_line_t* ln, uint8_t vbus)
 {
     uint32_t mv = (uint32_t)vbus * 500u;
 
-    Log_LineAdd(ln, "%lu.%luV", (unsigned long)(mv / 1000u),
-                (unsigned long)((mv % 1000u) / 100u));
+    Log_LineAdd(ln, "%lu.%luV", (unsigned long)(mv / 1000u), (unsigned long)((mv % 1000u) / 100u));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -213,8 +233,8 @@ static void Dbg_AddVbus8(log_line_t* ln, uint8_t vbus)
 
 static void Dbg_PrintDown(uint32_t now)
 {
-    log_line_t  ln;
-    uint8_t     hex[CTRL_DOWN_LEN];
+    log_line_t ln;
+    uint8_t hex[CTRL_DOWN_LEN];
     ctrl_down_t dn = s_dn;
 
     if (s_dn_valid == 0u) {
@@ -237,8 +257,8 @@ static void Dbg_PrintDown(uint32_t now)
 static void Dbg_PrintUp(uint32_t now)
 {
     log_line_t ln;
-    uint8_t    hex[CTRL_UP_LEN];
-    ctrl_up_t  up;
+    uint8_t hex[CTRL_UP_LEN];
+    ctrl_up_t up;
 
     /* 上行数据源与协议发送共用同一个取数入口，保证文本与线上帧一致 */
     (void)memset(&up, 0, sizeof(up));
@@ -264,10 +284,10 @@ static void Dbg_PrintUp(uint32_t now)
 static void Dbg_PrintFpga(uint32_t now)
 {
     log_line_t ln;
-    fpga_rx_t  rx = s_fp;
-    uint32_t   mv;
-    int32_t    ma;
-    char       sign;
+    fpga_rx_t rx = s_fp;
+    uint32_t mv;
+    int32_t ma;
+    char sign;
 
     if (s_fp_valid == 0u) {
         return;
@@ -282,8 +302,8 @@ static void Dbg_PrintFpga(uint32_t now)
         return;
     }
 
-    mv = fpga_vbus_to_mv(rx.vbus_raw);
-    ma = fpga_raw_to_milli(rx.iq_raw, FPGA_I_SHIFT);
+    mv   = fpga_vbus_to_mv(rx.vbus_raw);
+    ma   = fpga_raw_to_milli(rx.iq_raw, FPGA_I_SHIFT);
     sign = (ma < 0) ? '-' : '+';
     if (ma < 0) {
         ma = -ma;
@@ -293,8 +313,8 @@ static void Dbg_PrintFpga(uint32_t now)
                 (unsigned long)now, (unsigned long)(mv / 1000u),
                 (unsigned long)((mv % 1000u) / 100u),
                 (unsigned long)(fpga_angle_to_mdeg(rx.angle_raw) / 1000u),
-                (unsigned long)(fpga_angle_to_mdeg(rx.angle_raw) % 1000u), sign,
-                (long)(ma / 1000), (long)(ma % 1000), rx.enc_fault);
+                (unsigned long)(fpga_angle_to_mdeg(rx.angle_raw) % 1000u), sign, (long)(ma / 1000),
+                (long)(ma % 1000), rx.enc_fault);
     (void)Log_LineSend(&ln, LOG_CH_FPGA);
 }
 
@@ -309,9 +329,10 @@ static void Dbg_PrintFpga(uint32_t now)
 static void Dbg_PrintAngle(void)
 {
     log_line_t ln;
-    fpga_rx_t  rx;
-    uint32_t   mdeg15;
-    uint32_t   mdeg18;
+    fpga_rx_t rx;
+    uint32_t mdeg15;
+    uint32_t mdeg18;
+    uint32_t mdegCal;
 
     if (s_fp_valid == 0u) {
         return;
@@ -326,15 +347,20 @@ static void Dbg_PrintAngle(void)
         return;
     }
 
-    /* 两种口径都用整数拆分输出（与 "%.3f" 逐字节一致，但不引入浮点：
-     * 省掉 rtt 的浮点分支与软件 double 运算，也不在采样路径上增加几十 µs 开销）。 */
-    mdeg15 = fpga_angle_to_mdeg(rx.angle_raw);
-    mdeg18 = fpga_angle_to_mdeg18(rx.angle_raw);
+    /* 三种口径都用整数拆分输出（与 "%.3f" 逐字节一致，但不引入浮点：
+     * 省掉 rtt 的浮点分支与软件 double 运算，也不在采样路径上增加几十 µs 开销）。
+     * cal 为实测校准口径：raw = 0x870000 + 角度x8192，一圈跨越 0x2D0000。
+     * 15bit / 18bit 保留只为对照——实测两者都对不上真实机械角（见 fpga_proto.h 注释）。 */
+    mdeg15  = fpga_angle_to_mdeg(rx.angle_raw);
+    mdeg18  = fpga_angle_to_mdeg18(rx.angle_raw);
+    mdegCal = fpga_angle_to_mdeg_cal(rx.angle_raw);
 
     Log_LineInit(&ln);
-    Log_LineAdd(&ln, "15bit:%lu.%03lu,18bit:%lu.%03lu", (unsigned long)(mdeg15 / 1000u),
+    Log_LineAdd(&ln, "raw:0x%06lX,15bit:%lu.%03lu,18bit:%lu.%03lu,cal:%lu.%03lu",
+                (unsigned long)rx.angle_raw, (unsigned long)(mdeg15 / 1000u),
                 (unsigned long)(mdeg15 % 1000u), (unsigned long)(mdeg18 / 1000u),
-                (unsigned long)(mdeg18 % 1000u));
+                (unsigned long)(mdeg18 % 1000u), (unsigned long)(mdegCal / 1000u),
+                (unsigned long)(mdegCal % 1000u));
     (void)Log_LineSend(&ln, LOG_CH_ANGLE);
 }
 
@@ -345,13 +371,13 @@ static void Dbg_PrintAngle(void)
 static void Dbg_PrintRawFrame(void)
 {
     log_line_t ln;
-    uint8_t    win[FPGA_FRAME_LEN];
-    uint8_t    tx[FPGA_FRAME_LEN];
-    unsigned   n0 = 0u;
-    unsigned   nf = 0u;
-    unsigned   nd = 0u;
-    unsigned   i;
-    uint8_t    have_tx;
+    uint8_t win[FPGA_FRAME_LEN];
+    uint8_t tx[FPGA_FRAME_LEN];
+    unsigned n0 = 0u;
+    unsigned nf = 0u;
+    unsigned nd = 0u;
+    unsigned i;
+    uint8_t have_tx;
 
     if (FpgaLink_GetLastWindow(win) == 0u) {
         return;
@@ -404,17 +430,17 @@ static void Dbg_PrintRawFrame(void)
 static void Dbg_PrintAngleDiag(void)
 {
     log_line_t ln;
-    fpga_rx_t  rx = s_fp;
-    uint32_t   span;
-    uint32_t   d15;
-    uint32_t   d24;
+    fpga_rx_t rx = s_fp;
+    uint32_t span;
+    uint32_t d15;
+    uint32_t d24;
 
     if (s_fp_valid == 0u) {
         return;
     }
 
     span = (s_ang_max >= s_ang_min) ? (s_ang_max - s_ang_min) : 0u;
-    d15  = fpga_angle_to_mdeg(rx.angle_raw); /* 现行口径：1/2^15 度/LSB */
+    d15  = fpga_angle_to_mdeg(rx.angle_raw);                           /* 现行口径：1/2^15 度/LSB */
     d24  = (uint32_t)(((uint64_t)rx.angle_raw * 360000u) / 16777216u); /* 表1 总述口径 */
 
     Log_LineInit(&ln);
@@ -452,7 +478,8 @@ static void Dbg_PrintStat(void)
     log_line_t ln;
 
     Log_LineInit(&ln);
-    Log_LineAdd(&ln, "[ST] dn=%lu pr=%lu ctrl_err=%lu param_err=%lu t/o=%lu tx_drop=%lu nvm_err=%lu",
+    Log_LineAdd(&ln,
+                "[ST] dn=%lu pr=%lu ctrl_err=%lu param_err=%lu t/o=%lu tx_drop=%lu nvm_err=%lu",
                 (unsigned long)s_dn_cnt, (unsigned long)s_pr_cnt, (unsigned long)g_stat_ctrl_err,
                 (unsigned long)g_stat_param_err, (unsigned long)g_stat_timeout,
                 (unsigned long)g_stat_tx_drop, (unsigned long)g_stat_nvm_err);
@@ -460,18 +487,17 @@ static void Dbg_PrintStat(void)
 
     Log_LineInit(&ln);
     Log_LineAdd(&ln,
-                "[ST] cycle=%lu rx=%lu err=%lu rec=%lu e=0x%08lX slip=%lu ovr=%lu req_err=%lu nib=%lu | "
+                "[ST] cycle=%lu rx=%lu err=%lu rec=%lu e=0x%08lX slip=%lu ovr=%lu req_err=%lu "
+                "nib=%lu | "
                 "spi=%lu/%luus hal=%lu/%luus sck=%lukHz sync=%lu/%luus rej=%lu/%luus",
                 (unsigned long)g_fpga_cycle, (unsigned long)g_fpga_rx_cnt,
                 (unsigned long)g_fpga_err, (unsigned long)g_fpga_recover,
                 (unsigned long)g_fpga_err_detail, (unsigned long)g_fpga_slip,
                 (unsigned long)g_fpga_overrun, (unsigned long)g_fpga_req_err,
-                (unsigned long)g_fpga_nib_swap,
-                DBG_US(g_fpga_busy_us_min), DBG_US(g_fpga_busy_us_max),
-                DBG_US(g_fpga_hal_us_min), DBG_US(g_fpga_hal_us_max),
+                (unsigned long)g_fpga_nib_swap, DBG_US(g_fpga_busy_us_min),
+                DBG_US(g_fpga_busy_us_max), DBG_US(g_fpga_hal_us_min), DBG_US(g_fpga_hal_us_max),
                 (unsigned long)g_fpga_sck_khz, DBG_US(g_fpga_sync_us_min),
-                DBG_US(g_fpga_sync_us_max), DBG_US(g_fpga_rej_us_min),
-                DBG_US(g_fpga_rej_us_max));
+                DBG_US(g_fpga_sync_us_max), DBG_US(g_fpga_rej_us_min), DBG_US(g_fpga_rej_us_max));
     (void)Log_LineSend(&ln, LOG_CH_FPGA);
 }
 
@@ -481,7 +507,7 @@ static void Dbg_PrintStat(void)
 static void Dbg_PrintSyncHist(void)
 {
     log_line_t ln;
-    uint16_t   h[FPGA_SYNC_HIST_N];
+    uint16_t h[FPGA_SYNC_HIST_N];
 
     if (FpgaLink_TakeSyncHist(h) == 0u) {
         return;
@@ -489,8 +515,8 @@ static void Dbg_PrintSyncHist(void)
 
     Log_LineInit(&ln);
     Log_LineAdd(&ln, "[SH] sync(us) <20:%u 20-40:%u 40-56:%u 56-72:%u 72-88:%u >=88:%u",
-                (unsigned)h[0], (unsigned)h[1], (unsigned)h[2], (unsigned)h[3],
-                (unsigned)h[4], (unsigned)h[5]);
+                (unsigned)h[0], (unsigned)h[1], (unsigned)h[2], (unsigned)h[3], (unsigned)h[4],
+                (unsigned)h[5]);
     (void)Log_LineSend(&ln, LOG_CH_FPGA);
 }
 
@@ -526,8 +552,7 @@ void Dbg_Init(void)
     s_prev_ctrl = 0xFFu;
     s_prev_mode = 0xFFu;
 
-    Log_Printf(LOG_CH_MCU, "=== DEBUG REPORT ON (RTT, %u up ch) ===",
-               (unsigned)RTT_NUM_UP_BUFFERS);
+    Log_Printf(LOG_CH_MCU, "=== DEBUG REPORT ON (RTT, %u up ch) ===", (unsigned)RTT_NUM_UP_BUFFERS);
     Log_Printf(LOG_CH_MCU, "ch0/%s ch1/%s ch2/%s ch3/%s | buf %uB x%u", "MCU", "FPGA", "COMM",
                "ANGLE", (unsigned)RTT_BUFFER_SIZE_UP, (unsigned)RTT_NUM_UP_BUFFERS);
 #if (COMM_DEBUG_SILENT != 0)
@@ -535,8 +560,9 @@ void Dbg_Init(void)
 #else
     Log_Printf(LOG_CH_MCU, "mode: PROTOCOL ACTIVE - USART1 只跑协议，日志走 RTT 互不干扰");
 #endif
-    Log_Printf(LOG_CH_MCU, "tags: [DN] [UP] -> COMM | [FP] [WIN] [ANG] -> FPGA | "
-                           "[PR] [EV] [ST] -> MCU");
+    Log_Printf(LOG_CH_MCU,
+               "tags: [DN] [UP] -> COMM | [FP] [WIN] [ANG] -> FPGA | "
+               "[PR] [EV] [ST] -> MCU");
     Log_Printf(LOG_CH_MCU, "angle stream: ch3 @ %ums -> \"15bit:279.061,18bit:317.743\"",
                DBG_ANGLE_PERIOD_MS);
 }
@@ -605,7 +631,7 @@ void Dbg_OnEvent(const char* tag)
 
 void Dbg_Poll(void)
 {
-    uint32_t  now = CommProto_GetTick();
+    uint32_t now = CommProto_GetTick();
     ctrl_up_t up;
 
     /* 上行数据是"当前值"而非事件，每轮取一次用于状态位变化检测 */
@@ -624,8 +650,7 @@ void Dbg_Poll(void)
     }
 
     /* 事件优先：变化后立即输出一组，受最小间隔限制 */
-    if (((s_evt != 0u) || (s_pr_evt != 0u)) &&
-        ((uint32_t)(now - s_evt_tick) >= DBG_MIN_GAP_MS)) {
+    if (((s_evt != 0u) || (s_pr_evt != 0u)) && ((uint32_t)(now - s_evt_tick) >= DBG_MIN_GAP_MS)) {
         s_evt      = 0u;
         s_pr_evt   = 0u;
         s_evt_tick = now;
@@ -685,7 +710,7 @@ void Dbg_Poll(void)
 static unsigned Dbg_Hex32(char* p, uint32_t v)
 {
     static const char k_hex[] = "0123456789ABCDEF";
-    unsigned          i;
+    unsigned i;
 
     for (i = 0u; i < 8u; i++) {
         p[i] = k_hex[(v >> ((7u - i) * 4u)) & 0x0Fu];
@@ -700,13 +725,13 @@ static unsigned Dbg_Hex32(char* p, uint32_t v)
  */
 void Dbg_OnHardFault(void)
 {
-    static const char k_tag[]  = "\r\n[FAULT] CFSR=0x";
+    static const char k_tag[]       = "\r\n[FAULT] CFSR=0x";
     static const char k_name[3][10] = {" HFSR=0x", " MMFAR=0x", " BFAR=0x"};
-    uint32_t          val[3];
-    char              buf[96];
-    unsigned          n = 0u;
-    unsigned          i;
-    unsigned          k;
+    uint32_t val[3];
+    char buf[96];
+    unsigned n = 0u;
+    unsigned i;
+    unsigned k;
 
     for (i = 0u; i < (unsigned)(sizeof(k_tag) - 1u); i++) {
         buf[n++] = k_tag[i];

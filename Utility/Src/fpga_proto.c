@@ -265,6 +265,20 @@ uint32_t fpga_angle_to_mdeg18(uint32_t raw)
 }
 
 /**
+ * @brief 角度码值 -> 千分之一度（实测校准口径）
+ * @note  raw = FPGA_ANGLE_BASE + 角度 x 8192，一圈跨越 FPGA_ANGLE_SPAN。
+ *        先扣偏置再按 span 取模，结果恒在 0~359999。
+ */
+uint32_t fpga_angle_to_mdeg_cal(uint32_t raw)
+{
+    uint32_t d = (raw >= FPGA_ANGLE_BASE) ? (raw - FPGA_ANGLE_BASE) : 0u;
+
+    d %= FPGA_ANGLE_SPAN;
+
+    return (uint32_t)(((uint64_t)d * 360000u + (FPGA_ANGLE_SPAN / 2u)) / FPGA_ANGLE_SPAN);
+}
+
+/**
  * @brief 母线电压码值 -> mV
  */
 uint32_t fpga_vbus_to_mv(uint16_t raw)
