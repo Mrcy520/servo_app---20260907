@@ -211,11 +211,19 @@ void FpgaLink_Init(void)
 
 #if FPGA_LINK_SCK_DIV2
     /* 把 SCK 从 PCLK1/4 提到 PCLK1/2（9 MHz → 18 MHz）。
-     * 依据：接口文档写明 SPI 按 30 MHz 设计，18 MHz 在 FPGA 能力之内，
-     * 且 STM32F302 的 SPI 上限正是 PCLK1/2。
-     * 实测警告：18 MHz 下 HAL_SPI_TransmitReceive_DMA 每次同步返回失败
-     * （cycle 与 err 1:1、rx=0），原因待查——先看 [ST] 的 e= 字段再决定。
-     * 因此默认关闭，先用 9 MHz 保证链路通。 */
+     *
+     * 【实测结论：18 MHz 该 FPGA 用不了，默认关闭，勿再打开】
+     * 13:32 实测（锁泄漏已修、hal=7/8us、spi=33/53us、ovr=0、rec=0）：
+     *   时序问题确实消失（窗口装得下），但 [WIN] 收到的 32 字节几乎全是 0x00，
+     *   只有前 2 字节在变（75 6A / DD 3A / D5 2E …），rx=0、err=slip=cycle。
+     *   即 MISO 基本没数据 —— 不是帧头错位，是从机输出无效。
+     * 9 MHz 下同一套代码收数完全正常，说明**不是我们的启动/解析问题**，
+     * 而是该 FPGA 的 SPI 从机（或其连线信号完整性）做不到 18 MHz
+     * （接口文档写"按 30 MHz 设计"，与实测不符，可拿这条去核对）。
+     *
+     * 这条实测同时证明了一件事：18 MHz 时 ovr=0，说明我们软件侧的开销
+     * 已经不是瓶颈，窗口 24 µs 装得进 25 µs 的短间隙。
+     * 也就是说——只要 FPGA 能吃住更高 SCK，丢帧问题立刻消失。 */
     MODIFY_REG(SPI3->CR1, SPI_CR1_BR, SPI_BAUDRATEPRESCALER_2);
     hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
 #endif
@@ -304,10 +312,21 @@ static void FpgaLink_RecoverSpi(void)
     if (hspi3.hdmarx != NULL) {
         __HAL_DMA_DISABLE(hspi3.hdmarx);
         hspi3.hdmarx->State = HAL_DMA_STATE_READY;
+        /* 【关键】必须同时解锁。
+         * HAL_DMA_Start_IT 在**成功路径上不释放锁**（只有 else 分支 unlock），
+         * 锁是由 DMA 完成中断里的 HAL_DMA_IRQHandler 释放的。
+         * 一旦完成中断丢失、我们又在这里强制复位了通道，锁就永久停在 HAL_LOCKED，
+         * 此后每次 HAL_DMA_Start_IT 都直接 return HAL_BUSY（连 State 都不改），
+         * 于是 HAL_SPI_TransmitReceive_DMA 永远返回 HAL_ERROR —— 自愈反而变成永久死锁。
+         * 实测现象：18 MHz 下 err=cycle、rx=0、spi=0/0、e=0x01000501
+         * （低字节 01=HAL_ERROR，次字节 05=State 仍 BUSY_TX_RX，最高字节 01=hdmarx
+         *   State 却是 READY，正是"被锁挡住、状态没动"的指纹）。 */
+        hspi3.hdmarx->Lock = HAL_UNLOCKED;
     }
     if (hspi3.hdmatx != NULL) {
         __HAL_DMA_DISABLE(hspi3.hdmatx);
         hspi3.hdmatx->State = HAL_DMA_STATE_READY;
+        hspi3.hdmatx->Lock  = HAL_UNLOCKED;
     }
 
     __HAL_SPI_DISABLE(&hspi3);
@@ -399,11 +418,17 @@ static void FpgaLink_StartExchange(void)
 
         if (st != HAL_OK) {
             g_fpga_err++;
-            g_fpga_err_detail = ((uint32_t)st & 0xFFu) | (((uint32_t)hspi3.State & 0xFFu) << 8) |
-                                (((uint32_t)hspi3.Lock & 0xFFu) << 16) |
-                                (((uint32_t)((hspi3.hdmarx != NULL) ? hspi3.hdmarx->State : 0xFFu)
-                                  & 0xFFu)
-                                 << 24);
+            /* 现场快照按字节：低→高
+             *   [7:0]   HAL 返回码（0=OK 1=ERROR 2=BUSY 3=TIMEOUT）
+             *   [15:8]  hspi3.State（1=READY 3=BUSY_TX 5=BUSY_TX_RX）
+             *   [23:16] hdmarx->State（1=READY 2=BUSY）
+             *   [31:24] hdmarx->Lock（0=UNLOCKED 1=LOCKED）
+             * 最后两项是判定"锁泄漏"的指纹：返回 HAL_ERROR 而 DMA State 仍是 READY、
+             * Lock=LOCKED，就说明被锁挡住，而不是 DMA 真的忙。 */
+            g_fpga_err_detail =
+                ((uint32_t)st & 0xFFu) | (((uint32_t)hspi3.State & 0xFFu) << 8) |
+                (((uint32_t)((hspi3.hdmarx != NULL) ? hspi3.hdmarx->State : 0xFFu) & 0xFFu) << 16) |
+                (((uint32_t)((hspi3.hdmarx != NULL) ? hspi3.hdmarx->Lock : 0xFFu) & 0xFFu) << 24);
             /* HAL 失败路径会把 State 留在 BUSY_xxx，而完成回调永远不会来。
              * 不在这里复位，第一次失败就等于链路永久死亡。 */
             FpgaLink_RecoverSpi();
