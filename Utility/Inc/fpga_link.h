@@ -98,6 +98,12 @@ extern volatile uint32_t g_fpga_nib_swap;
  * 若持续增长，说明 FPGA 的 MISO 位相位在反复变化（该查 FPGA 侧）。 */
 extern volatile uint32_t g_fpga_phase_cnt;
 
+/* 实时帧里"角度相邻两帧跳变超过 FPGA_LINK_ANGLE_GLITCH"的次数（在解析路径里按帧统计，
+ * 不受调试采样率影响）。每次异常会 +2（跳出去一次、跳回来一次）。
+ * 用途：把"线上真实发生率"和"我们抽样看到的次数"区分开——
+ *       调试层 2 ms 才取一次样，看到 14 次并不等于线上只有 14 帧坏。 */
+extern volatile uint32_t g_fpga_angle_glitch;
+
 /* 同步沿间隔直方图：6 档，单位 µs
  *   [0] <20  [1] 20~40  [2] 40~56  [3] 56~72  [4] 72~88  [5] >=88
  * 取走后清零，因此每次得到的都是"上一个统计窗口"的分布。
@@ -127,6 +133,11 @@ uint8_t FpgaLink_GetRx(fpga_rx_t* out);
  * 用途：现场核对量纲/字节序时直接看线上字节，而不是看解码后的结构体
  *       （解码结构体重新编码出来的字节只能证明代码自洽，不能证明口径正确）。 */
 uint8_t FpgaLink_GetRawRx(uint8_t* out);
+
+/* 一次性取回"解码值 + 产生该值的那一帧字节"，两者在**同一临界区**内拷贝，保证成对。
+ * 为什么需要它：单独调 GetRx() 再调 GetRawRx() 会跨越两次中断，16 kHz 下一帧只有 62.5 µs，
+ * 两次调用之间可能已经换了好几帧 —— 拿到的字节和角度根本不是同一帧，无法作为证据。 */
+uint8_t FpgaLink_GetRxEx(fpga_rx_t* out, uint8_t* raw);
 
 /* 读取最近一个 DMA 窗口的原始字节（FPGA_FRAME_LEN 字节），**不论是否解出帧头**：
  * 返回 1 = 已有窗口，0 = 还没发生过一次交换。

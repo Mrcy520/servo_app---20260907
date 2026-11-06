@@ -54,11 +54,14 @@ static param_frame_t s_rsp;
 
 static uint8_t s_dn_valid;
 static uint8_t s_fp_valid;
+/* 与 s_fp 成对保存的**原始帧字节**。必须成对：16 kHz 下相邻帧只差 62.5 µs，
+ * 事后再去取"最新窗口"拿到的根本不是产生这个角度的那一帧（实测对不上，白丢一轮取证机会）。 */
+static uint8_t s_fp_raw[FPGA_FRAME_LEN];
 static uint8_t s_pr_valid;
 
 /* 角度流的状态：上一次 cal 值（突变检测）、故障帧跳过计数、突变次数 */
 static uint32_t s_ang_cal_prev;
-static uint8_t  s_ang_cal_valid;
+static uint8_t s_ang_cal_valid;
 static uint32_t s_ang_fault_cnt;
 static uint32_t s_ang_jump_cnt;
 
@@ -212,9 +215,9 @@ static void Dbg_AddPct(log_line_t* ln, int16_t ref)
 /* 上行角度：Uint24 对应 360/2^24 -> 0.001 度 */
 static void Dbg_AddAngle24(log_line_t* ln, uint32_t ang24)
 {
-    uint32_t mdeg = (uint32_t)(((uint64_t)ang24 * 360000u) / 16777216u);
+    // uint32_t mdeg = (uint32_t)(((uint64_t)ang24 * 360000u) / 16777216u);
 
-    Log_LineAdd(ln, "%lu.%03lu", (unsigned long)(mdeg / 1000u), (unsigned long)(mdeg % 1000u));
+    Log_LineAdd(ln, "%lu.%03lu", (unsigned long)(ang24 / 1000u), (unsigned long)(ang24 % 1000u));
 }
 
 /* 上行电流：Int16 对应 0.01 A */
@@ -322,9 +325,9 @@ static void Dbg_PrintFpga(uint32_t now)
     Log_LineAdd(&ln, "[FP] t=%5lums st=0x01 vbus=%lu.%luV ang=%lu.%03lu iq=%c%ld.%03ldA enc=0x%02X",
                 (unsigned long)now, (unsigned long)(mv / 1000u),
                 (unsigned long)((mv % 1000u) / 100u),
-                (unsigned long)(fpga_angle_to_mdeg(rx.angle_raw) / 1000u),
-                (unsigned long)(fpga_angle_to_mdeg(rx.angle_raw) % 1000u), sign, (long)(ma / 1000),
-                (long)(ma % 1000), rx.enc_fault);
+                (unsigned long)(fpga_angle_to_mdeg_cal(rx.angle_raw) / 1000u),
+                (unsigned long)(fpga_angle_to_mdeg_cal(rx.angle_raw) % 1000u), sign,
+                (long)(ma / 1000), (long)(ma % 1000), rx.enc_fault);
     (void)Log_LineSend(&ln, LOG_CH_FPGA);
 }
 
@@ -339,8 +342,8 @@ static void Dbg_PrintFpga(uint32_t now)
 static void Dbg_PrintAngle(void)
 {
     log_line_t ln;
-    fpga_rx_t  rx;
-    uint32_t   mdegCal;
+    fpga_rx_t rx;
+    uint32_t mdegCal;
 
     if (s_fp_valid == 0u) {
         return;
@@ -372,25 +375,24 @@ static void Dbg_PrintAngle(void)
      * 这里把该帧的 32 字节原始报文一起打出来，避免下次还要另抓 ch1 才能定因。 */
     if (s_ang_cal_valid != 0u) {
         uint32_t d = (mdegCal > s_ang_cal_prev) ? (mdegCal - s_ang_cal_prev)
-                                               : (s_ang_cal_prev - mdegCal);
+                                                : (s_ang_cal_prev - mdegCal);
 
         if (d > DBG_ANGLE_JUMP_MDEG) {
-            uint8_t win[FPGA_FRAME_LEN];
-            uint8_t have = FpgaLink_GetLastWindow(win);
-
             s_ang_jump_cnt++;
 
+            /* 打印的是**产生这个角度的那一帧**（s_fp_raw），不是"最新窗口"。
+             * 之前用 FpgaLink_GetLastWindow() 是错的：16 kHz 下打印时窗口早已换成下一帧，
+             * 于是 14 条 [JMP] 的报文全部显示正常值，等于什么都没证到。 */
             Log_LineInit(&ln);
-            Log_LineAdd(&ln, "[JMP] n=%lu ang=%lu.%03lu prev=%lu.%03lu raw=0x%06lX enc=0x%02X | ",
-                        (unsigned long)s_ang_jump_cnt, (unsigned long)(mdegCal / 1000u),
-                        (unsigned long)(mdegCal % 1000u), (unsigned long)(s_ang_cal_prev / 1000u),
-                        (unsigned long)(s_ang_cal_prev % 1000u), (unsigned long)rx.angle_raw,
-                        rx.enc_fault);
-            if (have != 0u) {
-                Log_LineAddHex(&ln, win, FPGA_FRAME_LEN);
-            } else {
-                Log_LineAdd(&ln, "(no window)");
-            }
+            Log_LineAdd(
+                    &ln,
+                    "[JMP] t=%5lums n=%lu ang=%lu.%03lu prev=%lu.%03lu raw=0x%06lX enc=0x%02X | ",
+                    (unsigned long)CommProto_GetTick(), (unsigned long)s_ang_jump_cnt,
+                    (unsigned long)(mdegCal / 1000u), (unsigned long)(mdegCal % 1000u),
+                    (unsigned long)(s_ang_cal_prev / 1000u),
+                    (unsigned long)(s_ang_cal_prev % 1000u), (unsigned long)rx.angle_raw,
+                    rx.enc_fault);
+            Log_LineAddHex(&ln, s_fp_raw, FPGA_FRAME_LEN);
             (void)Log_LineSend(&ln, LOG_CH_FPGA);
         }
     }
@@ -471,26 +473,20 @@ static void Dbg_PrintAngleDiag(void)
     log_line_t ln;
     fpga_rx_t rx = s_fp;
     uint32_t span;
-    uint32_t d15;
-    uint32_t d24;
 
     if (s_fp_valid == 0u) {
         return;
     }
 
     span = (s_ang_max >= s_ang_min) ? (s_ang_max - s_ang_min) : 0u;
-    d15  = fpga_angle_to_mdeg(rx.angle_raw);                           /* 现行口径：1/2^15 度/LSB */
-    d24  = (uint32_t)(((uint64_t)rx.angle_raw * 360000u) / 16777216u); /* 表1 总述口径 */
 
     Log_LineInit(&ln);
     Log_LineAdd(&ln,
-                "[ANG] raw=0x%06lX min=0x%06lX max=0x%06lX span=%lu | 1/2^15=%lu.%03lu "
-                "360/2^24=%lu.%03lu | fault=0x%02X over=%lu skipF=%lu jump=%lu",
+                "[ANG] raw=0x%06lX min=0x%06lX max=0x%06lX span=%lu "
+                " fault=0x%02X over=%lu skipF=%lu jump=%lu",
                 (unsigned long)rx.angle_raw, (unsigned long)s_ang_min, (unsigned long)s_ang_max,
-                (unsigned long)span, (unsigned long)(d15 / 1000u), (unsigned long)(d15 % 1000u),
-                (unsigned long)(d24 / 1000u), (unsigned long)(d24 % 1000u), rx.enc_fault,
-                (unsigned long)g_fpga_angle_over, (unsigned long)s_ang_fault_cnt,
-                (unsigned long)s_ang_jump_cnt);
+                (unsigned long)span, rx.enc_fault, (unsigned long)g_fpga_angle_over,
+                (unsigned long)s_ang_fault_cnt, (unsigned long)s_ang_jump_cnt);
     (void)Log_LineSend(&ln, LOG_CH_FPGA);
 }
 
@@ -528,14 +524,14 @@ static void Dbg_PrintStat(void)
     Log_LineInit(&ln);
     Log_LineAdd(&ln,
                 "[ST] cycle=%lu rx=%lu err=%lu rec=%lu e=0x%08lX slip=%lu ovr=%lu req_err=%lu "
-                "nib=%lu ph=%lu | "
+                "nib=%lu ph=%lu glt=%lu | "
                 "spi=%lu/%luus hal=%lu/%luus sck=%lukHz sync=%lu/%luus rej=%lu/%luus",
                 (unsigned long)g_fpga_cycle, (unsigned long)g_fpga_rx_cnt,
                 (unsigned long)g_fpga_err, (unsigned long)g_fpga_recover,
                 (unsigned long)g_fpga_err_detail, (unsigned long)g_fpga_slip,
                 (unsigned long)g_fpga_overrun, (unsigned long)g_fpga_req_err,
                 (unsigned long)g_fpga_nib_swap, (unsigned long)g_fpga_phase_cnt,
-                DBG_US(g_fpga_busy_us_min),
+                (unsigned long)g_fpga_angle_glitch, DBG_US(g_fpga_busy_us_min),
                 DBG_US(g_fpga_busy_us_max), DBG_US(g_fpga_hal_us_min), DBG_US(g_fpga_hal_us_max),
                 (unsigned long)g_fpga_sck_khz, DBG_US(g_fpga_sync_us_min),
                 DBG_US(g_fpga_sync_us_max), DBG_US(g_fpga_rej_us_min), DBG_US(g_fpga_rej_us_max));
@@ -631,13 +627,16 @@ void Dbg_OnDownFrame(const ctrl_down_t* dn)
     }
 }
 
-void Dbg_OnFpgaFrame(const fpga_rx_t* rx)
+void Dbg_OnFpgaFrame(const fpga_rx_t* rx, const uint8_t* raw)
 {
     if (rx == NULL) {
         return;
     }
     s_fp       = *rx;
     s_fp_valid = 1u;
+    if (raw != NULL) {
+        (void)memcpy(s_fp_raw, raw, FPGA_FRAME_LEN);
+    }
 
     /* 只统计实时帧：其它响应帧的字节 6-8 不是角度 */
     if (rx->state == FPGA_ST_COMM) {

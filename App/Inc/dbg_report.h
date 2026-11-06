@@ -65,7 +65,9 @@ void Dbg_Init(void);
 void Dbg_Poll(void);                                  /* 主循环调用 */
 void Dbg_OnUpFrame(const ctrl_up_t* up);              /* 上行帧组好后 */
 void Dbg_OnDownFrame(const ctrl_down_t* dn);          /* 下行帧接受后 */
-void Dbg_OnFpgaFrame(const fpga_rx_t* rx);            /* FPGA 响应帧解析后 */
+/* FPGA 响应帧解析后。raw = 与该解码值**同一帧**的 FPGA_FRAME_LEN 字节（由链路层在同一临界区
+ * 一起取出），用于"值异常时"直接核对线上字节——只给解码值无法区分是 FPGA 送错还是我方拼帧错。 */
+void Dbg_OnFpgaFrame(const fpga_rx_t* rx, const uint8_t* raw);
 void Dbg_OnParam(const param_frame_t* req, const param_frame_t* rsp); /* 参数读写 */
 void Dbg_OnEvent(const char* tag);                    /* 自定义事件（超时等） */
 
@@ -81,9 +83,10 @@ static inline void Dbg_OnDownFrame(const ctrl_down_t* dn)
 {
     (void)dn;
 }
-static inline void Dbg_OnFpgaFrame(const fpga_rx_t* rx)
+static inline void Dbg_OnFpgaFrame(const fpga_rx_t* rx, const uint8_t* raw)
 {
     (void)rx;
+    (void)raw;
 }
 static inline void Dbg_OnParam(const param_frame_t* req, const param_frame_t* rsp)
 {

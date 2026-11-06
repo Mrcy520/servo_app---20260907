@@ -45,6 +45,11 @@ static uint8_t s_raw_frame[FPGA_FRAME_LEN];
 static uint8_t s_last_win[FPGA_FRAME_LEN];
 static volatile uint8_t s_last_win_valid;
 
+/* 角度跳变检测：上一帧实时帧的角度（只在 ISR 里读写，无需 volatile）。
+ * 放在解析路径而不是调试层，是为了让计数不受 2 ms 采样率影响。 */
+static uint32_t s_prev_angle;
+static uint8_t  s_prev_angle_valid;
+
 /* 位相位缓存：实测该 FPGA 的 MISO 起始位相位在不同上电周期里会变（见过 0/1/4 位），
  * 但在一个上电周期内稳定。因此"检测一次 + 缓存"，而不是每帧穷举。
  * 检测只在窗口里找不到帧头时做一次，且必须通过帧头/状态校验才采用，
@@ -104,6 +109,9 @@ volatile uint32_t g_fpga_rej_us_max;
  * 就工作在"半字节互换"相位——数据仍是可用的（已纠正），但值得反馈给 FPGA 侧。 */
 volatile uint32_t g_fpga_nib_swap;
 
+/* 实时帧角度跳变计数（见头文件说明）。只在解析路径里累加，与调试采样率无关。 */
+volatile uint32_t g_fpga_angle_glitch;
+
 /* 位相位判定/变更次数（每次确定一个相位 +1）。正常应在上电后很快稳定为 1 次。 */
 volatile uint32_t g_fpga_phase_cnt;
 
@@ -161,6 +169,11 @@ static void FpgaLink_RecoverSpi(void);
  * ovr 每秒 +16000），现场只能靠复位恢复。 */
 #define FPGA_LINK_STUCK_US 500u
 
+/* 实时帧角度跳变门限：SPAN(0x2D0000) 对应 360°，20° ≈ 163840 counts。
+ * 取 20° 的理由：10 kHz 级采样下相邻两帧的机械位移远小于此（本台架 30 s 才走 0.01°），
+ * 20° 只可能来自数据异常，不会误伤真实运动。 */
+#define FPGA_LINK_ANGLE_GLITCH 163840u
+
 /* 锁定相位后，连续多少帧找不到帧头才重新判定相位（FPGA 重新上电可能换相位）。
  * 取 64 ≈ 4 ms，足够区分"偶发错帧"与"相位真的变了"。 */
 #define FPGA_LINK_PHASE_RETRY 64u
@@ -208,6 +221,9 @@ void FpgaLink_Init(void)
     g_fpga_rej_us_max  = 0u;
     g_fpga_nib_swap    = 0u;
     s_phase            = 0u;
+    s_prev_angle       = 0u;
+    s_prev_angle_valid = 0u;
+    g_fpga_angle_glitch = 0u;
     s_phase_lock       = 0u;
     s_phase_fail       = 0u;
     g_fpga_phase_cnt   = 0u;
@@ -614,6 +630,28 @@ static void FpgaLink_Parse(const uint8_t* frame)
      * 这里存的是**纠正后**的帧，[WIN] 才是线上的原始 32 字节。 */
     (void)memcpy(s_raw_frame, f, FPGA_FRAME_LEN);
 
+    /* 实时帧角度跳变统计：**在解析路径里按帧统计**，不依赖调试层的 2 ms 采样，
+     * 因此这个计数反映"线上真实发生了多少次"，可以用来判断调试层看到的次数是否被采样率
+     * 掩盖。按圆周差计算，避免 0xB40000->0x870000 的正常回绕被误记成跳变。 */
+    if (s_rx.state == FPGA_ST_COMM) {
+        if (s_prev_angle_valid != 0u) {
+            int32_t d = (int32_t)s_rx.angle_raw - (int32_t)s_prev_angle;
+
+            d %= (int32_t)FPGA_ANGLE_SPAN;
+            if (d > (int32_t)(FPGA_ANGLE_SPAN / 2u)) {
+                d -= (int32_t)FPGA_ANGLE_SPAN;
+            } else if (d < -(int32_t)(FPGA_ANGLE_SPAN / 2u)) {
+                d += (int32_t)FPGA_ANGLE_SPAN;
+            }
+
+            if ((d > (int32_t)FPGA_LINK_ANGLE_GLITCH) || (d < -(int32_t)FPGA_LINK_ANGLE_GLITCH)) {
+                g_fpga_angle_glitch++;
+            }
+        }
+        s_prev_angle       = s_rx.angle_raw;
+        s_prev_angle_valid = 1u;
+    }
+
     /* 非实时响应（0x02/0x03/0x04）单独计数：应用层据此判定请求已回应 */
     if (s_rx.state != FPGA_ST_COMM) {
         g_fpga_ack_state = s_rx.state;
@@ -639,6 +677,33 @@ uint8_t FpgaLink_GetRx(fpga_rx_t* out)
     __disable_irq();
 
     *out  = s_rx;
+    valid = s_rx_valid;
+
+    if (primask == 0u) {
+        __enable_irq();
+    }
+
+    return valid;
+}
+
+uint8_t FpgaLink_GetRxEx(fpga_rx_t* out, uint8_t* raw)
+{
+    uint8_t  valid;
+    uint32_t primask;
+
+    if ((out == NULL) && (raw == NULL)) {
+        return 0u;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    if (out != NULL) {
+        *out = s_rx;
+    }
+    if (raw != NULL) {
+        (void)memcpy(raw, s_raw_frame, FPGA_FRAME_LEN);
+    }
     valid = s_rx_valid;
 
     if (primask == 0u) {

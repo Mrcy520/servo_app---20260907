@@ -141,12 +141,14 @@ uint8_t FpgaApp_LinkAlive(void)
 static void FpgaApp_ConsumeRx(void)
 {
     fpga_rx_t rx;
+    uint8_t raw[FPGA_FRAME_LEN];
 
-    if (FpgaLink_GetRx(&rx) == 0u) {
+    /* 解码值与原始字节一次取回（同一临界区），保证调试层拿到的两者属于同一帧 */
+    if (FpgaLink_GetRxEx(&rx, raw) == 0u) {
         return; /* 尚未收到任何有效帧 */
     }
 
-    Dbg_OnFpgaFrame(&rx); /* 调试打印（编译期可关） */
+    Dbg_OnFpgaFrame(&rx, raw); /* 调试打印（编译期可关） */
 
     if (rx.state != FPGA_ST_COMM) {
         return; /* 只有 0x01 帧携带实时量 */
@@ -161,7 +163,9 @@ static void FpgaApp_ConsumeRx(void)
     if (fpga_angle_in_range(rx.angle_raw) == 0u) {
         g_fpga_angle_over++;
     }
-    g_status.angle = fpga_angle_to_ctrl24(rx.angle_raw);
+    // TODO: 以当前解析口径为准
+    // g_status.angle = fpga_angle_to_ctrl24(rx.angle_raw);
+    g_status.angle = fpga_angle_to_mdeg_cal(rx.angle_raw);
 
     g_status.iq = fpga_i_raw_to_ctrl16(rx.iq_raw);
 

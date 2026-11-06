@@ -60,9 +60,9 @@ extern "C" {
  * 本工程按具体帧定义（1/2^15）实现，FPGA_ANGLE_FULL 同时充当口径校验门限——
  * 若现场出现 raw > 满圈，即说明实际口径为 2^24，须改本条而非改函数。 */
 #define FPGA_ANGLE_FULL 11796480u
-#define FPGA_I_SHIFT     16u /* 电流 1/2^16 A/LSB         */
-#define FPGA_V_SHIFT     16u /* 电压 1/2^16 V/LSB         */
-#define FPGA_GAIN_SHIFT  4u  /* Kp/Ki 1/2^4，等价于参数协议的 ×16 */
+#define FPGA_I_SHIFT    16u /* 电流 1/2^16 A/LSB         */
+#define FPGA_V_SHIFT    16u /* 电压 1/2^16 V/LSB         */
+#define FPGA_GAIN_SHIFT 4u  /* Kp/Ki 1/2^4，等价于参数协议的 ×16 */
 
 /* 设定值满量程：外部控制协议只给"百分比"，内部接口给绝对量，故需一个满量程。
  * 取内部接口的量程上限：电压 ±30 V、电流 ±10 A（见文档表1/表2）。 */
@@ -168,11 +168,6 @@ int16_t fpga_i_raw_to_ctrl16(int32_t raw);
 /* 码值 -> 千分之一单位（mV / mA / 0.001 度），供诊断输出 */
 int32_t fpga_raw_to_milli(int32_t raw, uint8_t shift);
 uint32_t fpga_angle_to_mdeg(uint32_t raw);
-/* 同一 raw 的"18 位编码器口径"换算：把角度字段当作 18 位绝对位置（满圈 2^18=262144）。
- * 返回 0~359999（0.001 度），超过一圈自然回绕，不会出现 360.000。
- * 用途：与 fpga_angle_to_mdeg()（文档的 1/2^15 度口径，满圈 0xB40000）并排输出，
- * 由现场数据判断哪一种才与真实机械角一致。纯整数运算，可主机端测试。 */
-uint32_t fpga_angle_to_mdeg18(uint32_t raw);
 
 /* ===== 实测校准口径（2026-11-06 由原始值反推，并用 8412 条实测数据验证）=====
  * 实测模型：raw = 0x870000 + 90*N，N ∈ [0, 32767]，即**一圈正好跨越 0x2D0000**。
