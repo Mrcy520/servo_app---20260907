@@ -17,5 +17,5 @@
 		"--query-driver=${env:CUBE_BUNDLE_PATH}/gnu-tools-for-stm32/14.3.1+st.2/bin/arm-none-eabi-g++*"
 	],
 	"arm-companion.flash.backend": "openocd",
-	"arm-companion.debug.interfaceCfg": "interface/stlink.cfg"
+	"arm-companion.debug.interfaceCfg": "interface/cmsis-dap.cfg"
 }

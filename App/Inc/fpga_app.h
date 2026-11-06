@@ -29,6 +29,11 @@ extern "C" {
 /* 非实时请求（读参数/读数据/加载参数）无应答的次数 */
 extern volatile uint32_t g_fpga_req_err;
 
+/* 角度码值超出满圈（> FPGA_ANGLE_FULL）的帧数。
+ * 稳态应恒为 0；一旦持续增长，说明 FPGA 角度口径与本工程假设（1/2^15）不符，
+ * 此时上报给主控的角度已饱和在 359.99998°，属可观测的确定性故障而非随机抖动。 */
+extern volatile uint32_t g_fpga_angle_over;
+
 void FpgaApp_Init(void); /* 必须在 MX_SPI3_Init / MX_GPIO_Init 之后调用 */
 void FpgaApp_Poll(void); /* 主循环任务：1 ms 节拍消费响应、调度请求、刷新命令帧 */
 

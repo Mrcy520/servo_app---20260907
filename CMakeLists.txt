@@ -57,6 +57,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Utility/Src/retarget.c
     Utility/Src/crc.c
     Utility/Src/nvm.c
+    Utility/Src/rtt.c
 )
 
 # Add include paths

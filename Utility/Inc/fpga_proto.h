@@ -52,6 +52,14 @@ extern "C" {
 /* ===== 量纲（文档表1/表2 的"最小有效位"） ================================ */
 #define FPGA_VBUS_LSB_MV 11u /* 母线电压 0.011 V/LSB      */
 #define FPGA_ANGLE_SHIFT 15u /* 角度 1/2^15 度/LSB        */
+
+/* 角度满圈：360° = 360 × 2^15 = 11 796 480（= 0xB4 00 00）。
+ * 依据文档"编码器角度值 Uint24 / 最小有效位 1/(2^15)"，FPGA 正常输出
+ * 0 ~ FPGA_ANGLE_FULL-1，到满圈回绕为 0。
+ * 注意：文档表1 总述另写"最小有效位 360/(2^24)"，与上式相差 512 倍；
+ * 本工程按具体帧定义（1/2^15）实现，FPGA_ANGLE_FULL 同时充当口径校验门限——
+ * 若现场出现 raw > 满圈，即说明实际口径为 2^24，须改本条而非改函数。 */
+#define FPGA_ANGLE_FULL 11796480u
 #define FPGA_I_SHIFT     16u /* 电流 1/2^16 A/LSB         */
 #define FPGA_V_SHIFT     16u /* 电压 1/2^16 V/LSB         */
 #define FPGA_GAIN_SHIFT  4u  /* Kp/Ki 1/2^4，等价于参数协议的 ×16 */
@@ -140,8 +148,16 @@ uint8_t fpga_unpack_rx(const uint8_t* in, fpga_rx_t* rx);
 int32_t fpga_ref_to_v_raw(int16_t ref);
 int32_t fpga_ref_to_i_raw(int16_t ref);
 
-/* FPGA 原始角度（1/2^15 度）-> 对外控制帧的 Uint24 角度（360/2^24） */
+/* FPGA 原始角度（1/2^15 度）-> 对外控制帧的 Uint24 角度（360/2^24）
+ * 超出满圈返回饱和值 0xFFFFFF（不静默回绕），恰好满圈按 0° 处理。
+ * 配套用 fpga_angle_in_range 判定输入是否在量纲范围内。 */
 uint32_t fpga_angle_to_ctrl24(uint32_t raw);
+
+/* 角度码值是否在量纲范围内（0 ~ 满圈，含满圈的回绕点） */
+static inline uint8_t fpga_angle_in_range(uint32_t raw)
+{
+    return (raw <= FPGA_ANGLE_FULL) ? 1u : 0u;
+}
 
 /* FPGA 母线电压（0.011 V）-> 对外控制帧的 Uint8（0.5 V/LSB） */
 uint8_t fpga_vbus_to_ctrl8(uint16_t raw);

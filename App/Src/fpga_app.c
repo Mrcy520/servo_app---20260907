@@ -45,6 +45,7 @@ typedef enum {
 /* 内部状态                                                                    */
 /* -------------------------------------------------------------------------- */
 volatile uint32_t g_fpga_req_err; /* 请求无应答次数 */
+volatile uint32_t g_fpga_angle_over;
 
 static fpga_req_t s_req;
 static uint32_t s_req_tick;
@@ -152,9 +153,17 @@ static void FpgaApp_ConsumeRx(void)
     }
 
     /* 量纲换算到对外控制协议（见 fpga_proto.h 的换算函数） */
-    g_status.vbus  = fpga_vbus_to_ctrl8(rx.vbus_raw);
+    g_status.vbus = fpga_vbus_to_ctrl8(rx.vbus_raw);
+
+    /* 角度先做量纲范围校验再换算：超量程时换算函数饱和到 359.99998°，
+     * 这里累计次数，供现场判定 FPGA 实际口径是否为 1/2^15。
+     * 不并入 ST_ANGLE_ERR——那一位由 FPGA 的 enc_fault 独占，混入会让故障源不可辨。 */
+    if (fpga_angle_in_range(rx.angle_raw) == 0u) {
+        g_fpga_angle_over++;
+    }
     g_status.angle = fpga_angle_to_ctrl24(rx.angle_raw);
-    g_status.iq    = fpga_i_raw_to_ctrl16(rx.iq_raw);
+
+    g_status.iq = fpga_i_raw_to_ctrl16(rx.iq_raw);
 
     /* 编码器故障字：
      *   ① 源位跟随电平——bit0 必须反映"当前是否报警"，否则主控清一次锁存后
