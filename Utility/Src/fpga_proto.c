@@ -194,11 +194,6 @@ int32_t fpga_ref_to_i_raw(int16_t ref)
  *        64/45 与 2^9/360 精确相等，故除整数截断外无原理误差。
  *        满圈自洽性：360 × 2^15 = 11 796 480 恰为 45 的整数倍（= 2^18），
  *        故 raw = 满圈时结果精确等于 2^24，回绕后为 0。
- * @note  分子分母同扩 2 倍（×128 / 90）实现对称四舍五入，消除截断带来的
- *        -0.5 LSB 恒定偏置；误差由 [0, 1) LSB 收窄到 [-0.5, 0.5) LSB。
- * @note  超量程（raw > 满圈）返回饱和值而非回绕：回绕结果仍落在 0~360 的
- *        合法区间内，会掩盖"量纲口径不符"这类系统性错误（例如 FPGA 实为
- *        360/2^24 口径时，raw 可达 2^24-1，回绕后将报出完全错误但看似合理的角度）。
  */
 uint32_t fpga_angle_to_ctrl24(uint32_t raw)
 {
@@ -255,6 +250,18 @@ int32_t fpga_raw_to_milli(int32_t raw, uint8_t shift)
 uint32_t fpga_angle_to_mdeg(uint32_t raw)
 {
     return (uint32_t)(((uint64_t)raw * 1000u + 16384u) / 32768u);
+}
+
+/**
+ * @brief 角度码值 -> 千分之一度（18 位编码器口径）
+ * @note  满圈 = 2^18 = 262144；只取低 18 位，超出部分视为多圈/无效高位丢弃，
+ *        因此结果恒在 0~359999，不会出现 360.000。
+ */
+uint32_t fpga_angle_to_mdeg18(uint32_t raw)
+{
+    uint32_t cnt = raw & 0x3FFFFu;
+
+    return (uint32_t)(((uint64_t)cnt * 360000u + 131072u) / 262144u);
 }
 
 /**

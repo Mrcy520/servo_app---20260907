@@ -168,6 +168,11 @@ int16_t fpga_i_raw_to_ctrl16(int32_t raw);
 /* 码值 -> 千分之一单位（mV / mA / 0.001 度），供诊断输出 */
 int32_t fpga_raw_to_milli(int32_t raw, uint8_t shift);
 uint32_t fpga_angle_to_mdeg(uint32_t raw);
+/* 同一 raw 的"18 位编码器口径"换算：把角度字段当作 18 位绝对位置（满圈 2^18=262144）。
+ * 返回 0~359999（0.001 度），超过一圈自然回绕，不会出现 360.000。
+ * 用途：与 fpga_angle_to_mdeg()（文档的 1/2^15 度口径，满圈 0xB40000）并排输出，
+ * 由现场数据判断哪一种才与真实机械角一致。纯整数运算，可主机端测试。 */
+uint32_t fpga_angle_to_mdeg18(uint32_t raw);
 uint32_t fpga_vbus_to_mv(uint16_t raw);
 
 #ifdef __cplusplus

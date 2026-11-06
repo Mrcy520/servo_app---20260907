@@ -126,7 +126,7 @@ static void FpgaLink_HistAdd(uint32_t us)
     }
 }
 
-static volatile uint8_t  s_dwt_ok;
+static volatile uint8_t s_dwt_ok;
 static volatile uint32_t s_ts_prev_edge; /* 上一次同步沿的时间戳 */
 static volatile uint32_t s_ts_start;     /* 本次发起 DMA 前的时刻 */
 
@@ -177,12 +177,12 @@ void FpgaLink_Init(void)
 
     /* 时序诊断：打开 DWT 周期计数器（Cortex-M4 内核自带，零额外硬件） */
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT->CYCCNT       = 0u;
-    DWT->CTRL        |= DWT_CTRL_CYCCNTENA_Msk;
-    s_dwt_ok          = 1u;
+    DWT->CYCCNT = 0u;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    s_dwt_ok = 1u;
 
-    s_ts_prev_edge    = 0u;
-    s_ts_start        = DWT->CYCCNT; /* 不能留 0，否则首个沿会误判"卡死" */
+    s_ts_prev_edge     = 0u;
+    s_ts_start         = DWT->CYCCNT; /* 不能留 0，否则首个沿会误判"卡死" */
     g_fpga_sync_us_min = 0xFFFFFFFFu;
     g_fpga_sync_us_max = 0u;
     g_fpga_busy_us_min = 0xFFFFFFFFu;
@@ -193,8 +193,8 @@ void FpgaLink_Init(void)
     g_fpga_rej_us_max  = 0u;
     g_fpga_nib_swap    = 0u;
     (void)memset((void*)s_sync_hist, 0, sizeof(s_sync_hist));
-    g_fpga_recover     = 0u;
-    g_fpga_err_detail  = 0u;
+    g_fpga_recover    = 0u;
+    g_fpga_err_detail = 0u;
 
     /* ===== 时序参数就地改写 =====
      * 这里**只改寄存器**，绝不调用 HAL_SPI_Init()：实测完整重初始化会把 HAL 的
@@ -411,8 +411,8 @@ static void FpgaLink_StartExchange(void)
     s_ts_start = now;
 
     {
-        HAL_StatusTypeDef st = HAL_SPI_TransmitReceive_DMA(&hspi3, s_tx_local, s_rx_win,
-                                                           (uint16_t)FPGA_FRAME_LEN);
+        HAL_StatusTypeDef st =
+                HAL_SPI_TransmitReceive_DMA(&hspi3, s_tx_local, s_rx_win, (uint16_t)FPGA_FRAME_LEN);
 
         if (s_dwt_ok != 0u) {
             uint32_t us = FPGA_CYC_TO_US(DWT->CYCCNT - s_ts_start);
@@ -435,9 +435,11 @@ static void FpgaLink_StartExchange(void)
              * 最后两项是判定"锁泄漏"的指纹：返回 HAL_ERROR 而 DMA State 仍是 READY、
              * Lock=LOCKED，就说明被锁挡住，而不是 DMA 真的忙。 */
             g_fpga_err_detail =
-                ((uint32_t)st & 0xFFu) | (((uint32_t)hspi3.State & 0xFFu) << 8) |
-                (((uint32_t)((hspi3.hdmarx != NULL) ? hspi3.hdmarx->State : 0xFFu) & 0xFFu) << 16) |
-                (((uint32_t)((hspi3.hdmarx != NULL) ? hspi3.hdmarx->Lock : 0xFFu) & 0xFFu) << 24);
+                    ((uint32_t)st & 0xFFu) | (((uint32_t)hspi3.State & 0xFFu) << 8) |
+                    (((uint32_t)((hspi3.hdmarx != NULL) ? hspi3.hdmarx->State : 0xFFu) & 0xFFu)
+                     << 16) |
+                    (((uint32_t)((hspi3.hdmarx != NULL) ? hspi3.hdmarx->Lock : 0xFFu) & 0xFFu)
+                     << 24);
             /* HAL 失败路径会把 State 留在 BUSY_xxx，而完成回调永远不会来。
              * 不在这里复位，第一次失败就等于链路永久死亡。 */
             FpgaLink_RecoverSpi();
@@ -535,9 +537,9 @@ static void FpgaLink_RxWindow(const uint8_t* win)
  */
 static void FpgaLink_Parse(const uint8_t* frame)
 {
-    uint8_t        swapped[FPGA_FRAME_LEN];
+    uint8_t swapped[FPGA_FRAME_LEN];
     const uint8_t* f = frame;
-    uint8_t        i;
+    uint8_t i;
 
     /* 半字节相位兜底（实测该 FPGA 存在这种输出相位）：
      * 某些上电周期里，它把**每个字节的 nibble 交换**后发出——实测 0x30 = 0x03 交换、
@@ -670,8 +672,8 @@ uint8_t FpgaLink_GetLastTx(uint8_t* out)
 uint8_t FpgaLink_TakeSyncHist(uint16_t* out)
 {
     uint32_t primask;
-    uint8_t  i;
-    uint8_t  any = 0u;
+    uint8_t i;
+    uint8_t any = 0u;
 
     if (out == NULL) {
         return 0u;

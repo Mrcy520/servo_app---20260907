@@ -12,7 +12,7 @@
  *   LOG_CH_COMM  [DN] [UP]          外部协议报文，含线上 hex
  *   LOG_CH_FPGA  [FP] [ST]          FPGA 内部接口实时量与 SPI3 链路统计
  *   LOG_CH_MCU   [PR] [EV] [ST]     MCU 自身：参数读写、事件、协议统计
- *   LOG_CH_ANGLE angle:359.997      角度单值流，等间隔采样，专供作图
+ *   LOG_CH_ANGLE 15bit:279.061,18bit:317.743  角度单值流（同 raw 双口径），专供比对
  *
  * 开关：
  *   COMM_DEBUG_REPORT = 1  调试期：上述日志全部输出

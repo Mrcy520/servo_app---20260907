@@ -7,7 +7,7 @@
  *   LOG_CH_MCU   [BOOT] [PR] [EV] [ST]   MCU 自身：启动、参数、事件、统计
  *   LOG_CH_FPGA  [FP] [ST]               FPGA 内部接口：实时量、SPI3 链路统计
  *   LOG_CH_COMM  [DN] [UP]               外部协议：上下行报文（含线上 hex）
- *   LOG_CH_ANGLE angle:359.997           角度单值流：等间隔采样，专供作图
+ *   LOG_CH_ANGLE 15bit:279.061,18bit:317.743  角度单值流：同 raw 双口径，专供比对
  *
  * 输出样例（默认 200 ms 摘要；状态/控制字/参数变化时即时输出；1 Hz 统计）：
  *   [DN] t= 1234ms ctrl=0x01(EN) mode=VOLT q=+10.00% d=+0.00% | AA 55 01 01 06 66 00 00 00 6D
@@ -17,7 +17,7 @@
  *   [ST] dn=1234 pr=3 ctrl_err=0 param_err=0 t/o=0 tx_drop=0 | rtt_drop 0/0/0/0
  *   [ANG] raw=0x0A1234 min=0x000000 max=0x0B3FFF span=734207 | 1/2^15=323.251 ...
  *   [RAW] AA 55 01 09 F1 0A 12 34 FF ...   32 字节原始接收帧
- *   angle:359.997                      <- ch3，1 kHz，每行一个样本
+ *   15bit:279.061,18bit:317.743        <- ch3，500 Hz，每行一个样本（双口径）
  *
  * 设计约束：
  *   1. 所有输出只在 Dbg_Poll()（主循环）里发生，钩子仅做结构体快照并置事件标志，
@@ -298,15 +298,20 @@ static void Dbg_PrintFpga(uint32_t now)
     (void)Log_LineSend(&ln, LOG_CH_FPGA);
 }
 
-/* 角度单值流（ch3）：每行只有一个样本，格式固定为 "angle:359.997"。
- * 目的：主机侧（RTT Viewer 的 Data 视图 / 自写脚本）按行直接解析成浮点序列作图，
- * 因此刻意不加时间戳、不加其它字段——多一个字段就得多写一个解析器。
+/* 角度单值流（ch3）：同一 raw 按两种口径各算一次，等间隔采样，专供作图比对。
+ *
+ * 格式固定为   15bit:279.061,18bit:317.743
+ *   15bit —— 文档定义的口径：LSB = 1/2^15 度，满圈 0xB40000（当前工程用它）
+ *   18bit —— 把该字段当作 18 位编码器绝对位置：满圈 2^18 = 262144
+ * 两者都只依赖同一个 rx.angle_raw，逐行可直接算出差值，便于判断哪一种与真实机械角吻合。
+ * 刻意不加时间戳、不加其它字段：主机侧按逗号/冒号切分即可。
  * 只在 FPGA 返回正常实时帧（0x01）时输出，避免故障帧的残留角度混进曲线。 */
 static void Dbg_PrintAngle(void)
 {
     log_line_t ln;
     fpga_rx_t  rx;
-    uint32_t   mdeg;
+    uint32_t   mdeg15;
+    uint32_t   mdeg18;
 
     if (s_fp_valid == 0u) {
         return;
@@ -321,14 +326,15 @@ static void Dbg_PrintAngle(void)
         return;
     }
 
-    /* 源分辨率就是 0.001 度（1/2^15 度/LSB 换算而来），整数拆分输出与 "%.3f"
-     * 逐字节一致，但不触发浮点格式化：省掉 rtt 的浮点分支与软件 double 运算
-     * （实测约 3.3 KB Flash），也不会在 1 kHz 路径上引入几十 µs 的 double 开销。 */
-    mdeg = fpga_angle_to_mdeg(rx.angle_raw);
+    /* 两种口径都用整数拆分输出（与 "%.3f" 逐字节一致，但不引入浮点：
+     * 省掉 rtt 的浮点分支与软件 double 运算，也不在采样路径上增加几十 µs 开销）。 */
+    mdeg15 = fpga_angle_to_mdeg(rx.angle_raw);
+    mdeg18 = fpga_angle_to_mdeg18(rx.angle_raw);
 
     Log_LineInit(&ln);
-    Log_LineAdd(&ln, "angle:%lu.%03lu", (unsigned long)(mdeg / 1000u),
-                (unsigned long)(mdeg % 1000u));
+    Log_LineAdd(&ln, "15bit:%lu.%03lu,18bit:%lu.%03lu", (unsigned long)(mdeg15 / 1000u),
+                (unsigned long)(mdeg15 % 1000u), (unsigned long)(mdeg18 / 1000u),
+                (unsigned long)(mdeg18 % 1000u));
     (void)Log_LineSend(&ln, LOG_CH_ANGLE);
 }
 
@@ -531,7 +537,8 @@ void Dbg_Init(void)
 #endif
     Log_Printf(LOG_CH_MCU, "tags: [DN] [UP] -> COMM | [FP] [WIN] [ANG] -> FPGA | "
                            "[PR] [EV] [ST] -> MCU");
-    Log_Printf(LOG_CH_MCU, "angle stream: ch3 @ %ums -> \"angle:359.997\"", DBG_ANGLE_PERIOD_MS);
+    Log_Printf(LOG_CH_MCU, "angle stream: ch3 @ %ums -> \"15bit:279.061,18bit:317.743\"",
+               DBG_ANGLE_PERIOD_MS);
 }
 
 void Dbg_OnDownFrame(const ctrl_down_t* dn)
