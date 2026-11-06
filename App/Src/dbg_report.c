@@ -454,12 +454,13 @@ static void Dbg_PrintStat(void)
 
     Log_LineInit(&ln);
     Log_LineAdd(&ln,
-                "[ST] cycle=%lu rx=%lu err=%lu rec=%lu e=0x%08lX slip=%lu ovr=%lu req_err=%lu | "
+                "[ST] cycle=%lu rx=%lu err=%lu rec=%lu e=0x%08lX slip=%lu ovr=%lu req_err=%lu nib=%lu | "
                 "spi=%lu/%luus hal=%lu/%luus sck=%lukHz sync=%lu/%luus rej=%lu/%luus",
                 (unsigned long)g_fpga_cycle, (unsigned long)g_fpga_rx_cnt,
                 (unsigned long)g_fpga_err, (unsigned long)g_fpga_recover,
                 (unsigned long)g_fpga_err_detail, (unsigned long)g_fpga_slip,
                 (unsigned long)g_fpga_overrun, (unsigned long)g_fpga_req_err,
+                (unsigned long)g_fpga_nib_swap,
                 DBG_US(g_fpga_busy_us_min), DBG_US(g_fpga_busy_us_max),
                 DBG_US(g_fpga_hal_us_min), DBG_US(g_fpga_hal_us_max),
                 (unsigned long)g_fpga_sck_khz, DBG_US(g_fpga_sync_us_min),

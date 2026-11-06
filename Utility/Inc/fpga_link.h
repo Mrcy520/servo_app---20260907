@@ -89,6 +89,11 @@ extern volatile uint32_t g_fpga_hal_us_max;
 extern volatile uint32_t g_fpga_rej_us_min;
 extern volatile uint32_t g_fpga_rej_us_max;
 
+/* nibble 交换纠正次数。恒为 0 = FPGA 输出相位正常；
+ * 持续增长 = 该 FPGA 本次上电工作在"每字节高低半字节互换"的相位，
+ * 数据已被纠正、可正常使用，但这个相位本身应由 FPGA 侧修掉。 */
+extern volatile uint32_t g_fpga_nib_swap;
+
 /* 同步沿间隔直方图：6 档，单位 µs
  *   [0] <20  [1] 20~40  [2] 40~56  [3] 56~72  [4] 72~88  [5] >=88
  * 取走后清零，因此每次得到的都是"上一个统计窗口"的分布。

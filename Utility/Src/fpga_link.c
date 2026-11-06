@@ -92,6 +92,10 @@ volatile uint32_t g_fpga_hal_us_max;
 volatile uint32_t g_fpga_rej_us_min = 0xFFFFFFFFu;
 volatile uint32_t g_fpga_rej_us_max;
 
+/* nibble 交换纠正次数。正常应恒为 0；若持续增长，说明该 FPGA 这一次上电
+ * 就工作在"半字节互换"相位——数据仍是可用的（已纠正），但值得反馈给 FPGA 侧。 */
+volatile uint32_t g_fpga_nib_swap;
+
 /* 同步沿间隔直方图（每 5 s 由诊断层取走并清零）。
  * 稳态 16 kHz = 62.5 µs，样本应几乎全部落在 56~72 这一档。
  * 若出现大量 <40 µs 的样本，说明"沿与沿之间"本身就不均匀（FPGA 抖动，
@@ -130,6 +134,10 @@ static volatile uint32_t s_ts_start;     /* 本次发起 DMA 前的时刻 */
 
 /* 最近一次有效帧所处的周期号 */
 static volatile uint32_t s_last_rx_cycle;
+
+/* 半字节交换（nibble swap）。用于纠正 FPGA 在某些上电相位下的输出错位：
+ * 实测该现象下每个字节的高低半字节互换，整帧交换后与正常帧逐字节一致。 */
+#define FPGA_NIB_SWAP(b) ((uint8_t)(((uint8_t)(b) >> 4) | (uint8_t)((uint8_t)(b) << 4)))
 
 /* 私有函数声明 ------------------------------------------------------------ */
 static void FpgaLink_StartExchange(void);
@@ -183,6 +191,7 @@ void FpgaLink_Init(void)
     g_fpga_hal_us_max  = 0u;
     g_fpga_rej_us_min  = 0xFFFFFFFFu;
     g_fpga_rej_us_max  = 0u;
+    g_fpga_nib_swap    = 0u;
     (void)memset((void*)s_sync_hist, 0, sizeof(s_sync_hist));
     g_fpga_recover     = 0u;
     g_fpga_err_detail  = 0u;
@@ -472,11 +481,16 @@ static void FpgaLink_RxWindow(const uint8_t* win)
             break; /* 不足一帧，等下一窗口 */
         }
 
-        /* 搜索帧头，并要求状态字节合法以降低误锁概率 */
+        /* 搜索帧头，并要求状态字节合法以降低误锁概率。
+         * 注意：状态字节也要接受"nibble 交换后合法"的情况——该 FPGA 存在
+         * 把每个字节高低半字节互换后输出的相位（0x30=0x03、0x40=0x04）。
+         * 因为 AA/55 是半字节回文，帧头不受影响；若这里只认原样合法，
+         * 这种相位下会一个帧头都锁不到（表现为 err=slip=cycle、rx=0）。 */
         for (i = 0u; (uint16_t)(i + 1u) < avail; i++) {
             if ((s_stream[s_rd + i] == FPGA_HDR_RX0) && (s_stream[s_rd + i + 1u] == FPGA_HDR_RX1)) {
                 if (((uint16_t)(i + 2u) < avail) &&
-                    (FPGA_ST_IS_VALID(s_stream[s_rd + i + 2u]) == 0u)) {
+                    (FPGA_ST_IS_VALID(s_stream[s_rd + i + 2u]) == 0u) &&
+                    (FPGA_ST_IS_VALID(FPGA_NIB_SWAP(s_stream[s_rd + i + 2u])) == 0u)) {
                     continue;
                 }
                 found = (uint8_t)i;
@@ -521,7 +535,28 @@ static void FpgaLink_RxWindow(const uint8_t* win)
  */
 static void FpgaLink_Parse(const uint8_t* frame)
 {
-    if (fpga_unpack_rx(frame, &s_rx) == 0u) {
+    uint8_t        swapped[FPGA_FRAME_LEN];
+    const uint8_t* f = frame;
+    uint8_t        i;
+
+    /* 半字节相位兜底（实测该 FPGA 存在这种输出相位）：
+     * 某些上电周期里，它把**每个字节的 nibble 交换**后发出——实测 0x30 = 0x03 交换、
+     * 0x40 = 0x04 交换，且整帧 24 字节与往次正常帧逐字节完全一致（见下）。
+     * 惩罚很小的原因：AA=0xAA、55=0x55 都是半字节回文，交换后帧头不变，
+     * 所以滑窗照样锁得到帧头，只有第 3 字节会变成非法的 0x30/0x40。
+     * 判据就用这一条：正常解不出 state 时，交换 nibble 再解一次。
+     * 这样 FPGA 无论进入哪个相位都能工作，不必要求现场断电重来。 */
+    if (FPGA_ST_IS_VALID(frame[2]) == 0u) {
+        for (i = 0u; i < (uint8_t)FPGA_FRAME_LEN; i++) {
+            swapped[i] = FPGA_NIB_SWAP(frame[i]);
+        }
+        if (FPGA_ST_IS_VALID(swapped[2]) != 0u) {
+            f = swapped;
+            g_fpga_nib_swap++;
+        }
+    }
+
+    if (fpga_unpack_rx(f, &s_rx) == 0u) {
         g_fpga_err++;
         return;
     }
@@ -530,8 +565,9 @@ static void FpgaLink_Parse(const uint8_t* frame)
     s_last_rx_cycle = g_fpga_cycle;
     g_fpga_rx_cnt++;
 
-    /* 保留原始字节：调试层可按线上字节核对量纲，而不是看解码后的结构体 */
-    (void)memcpy(s_raw_frame, frame, FPGA_FRAME_LEN);
+    /* 保留原始字节：调试层可按线上字节核对量纲，而不是看解码后的结构体。
+     * 这里存的是**纠正后**的帧，[WIN] 才是线上的原始 32 字节。 */
+    (void)memcpy(s_raw_frame, f, FPGA_FRAME_LEN);
 
     /* 非实时响应（0x02/0x03/0x04）单独计数：应用层据此判定请求已回应 */
     if (s_rx.state != FPGA_ST_COMM) {
