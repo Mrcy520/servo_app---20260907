@@ -76,6 +76,28 @@ extern volatile uint32_t g_fpga_sync_us_max;
 extern volatile uint32_t g_fpga_busy_us_min;
 extern volatile uint32_t g_fpga_busy_us_max;
 
+/* 发起阶段纯软件开销：s_ts_start → HAL_SPI_TransmitReceive_DMA 返回。
+ * 判读（配合 busy）：busy - hal ≈ 传输 + 中断延迟。
+ *   hal ≈ 1~3 µs 且 busy ≈ 51 µs  → 传输本身慢，SCK 实际不到 9 MHz；
+ *   hal ≥ 15 µs                   → 慢在 -O0 下 HAL 调用自身，需绕开 HAL 或局部 -O2。 */
+extern volatile uint32_t g_fpga_hal_us_min;
+extern volatile uint32_t g_fpga_hal_us_max;
+
+/* 被拒绝时"距上次发起过了多久"。
+ *   ≈60~62 → 上一次交换占满周期，窗口太长（继续压软件开销有效）；
+ *   ≈20~30 → 沿在交换未完成时就到，沿间隔本身短于 62.5 µs（压窗口无效）。 */
+extern volatile uint32_t g_fpga_rej_us_min;
+extern volatile uint32_t g_fpga_rej_us_max;
+
+/* 同步沿间隔直方图：6 档，单位 µs
+ *   [0] <20  [1] 20~40  [2] 40~56  [3] 56~72  [4] 72~88  [5] >=88
+ * 取走后清零，因此每次得到的都是"上一个统计窗口"的分布。
+ * 判读：稳态 16 kHz 应几乎全部落在 [3]。若 [0]/[1] 占比可观，
+ * 说明同步沿本身不均匀（FPGA 抖动或中断延迟抖动），
+ * 那时压缩 SPI 窗口也无法做到零丢帧，需要 FPGA 侧一起看。 */
+#define FPGA_SYNC_HIST_N 6
+uint8_t FpgaLink_TakeSyncHist(uint16_t* out);
+
 /* SPI3 实际 SCK 频率（kHz），由 PCLK1 与 CR1.BR 现场算出：
  * 32 字节 = 256 bit，理论占用 = 256 / SCK。9 MHz → 28.4 µs。
  * 若这里显示的不是 9000，说明分频或时钟源与预期不符，先改这里。 */

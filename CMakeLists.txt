@@ -68,6 +68,25 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Utility/Inc
 )
 
+# 时序关键路径单独用 -O2
+# ---------------------------------------------------------------------------
+# Debug 预设全局是 -O0。实测 [ST] 的 hal=12/13us —— 光是
+# HAL_SPI_TransmitReceive_DMA 的函数体（含两次 HAL_DMA_Start_IT）在 -O0 下
+# 就要 12~13 µs，而 16 kHz 下整个 SPI 窗口只有 62.5 µs 预算，传输本身占 28.4 µs。
+# 这三段代码只影响"发起/完成一次交换"的路径，不改变任何逻辑；
+# 编成 -O2 后窗口预期从 44 µs 降到 ~33 µs，把余量让给同步沿抖动。
+# 只加这三个文件，其余代码仍保持 -O0，便于单步调试。
+set_source_files_properties(
+    Utility/Src/fpga_link.c
+    PROPERTIES COMPILE_OPTIONS "-O2"
+)
+set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/STM32F3xx_HAL_Driver/Src/stm32f3xx_hal_spi.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/STM32F3xx_HAL_Driver/Src/stm32f3xx_hal_dma.c
+    DIRECTORY cmake/stm32cubemx
+    PROPERTIES COMPILE_OPTIONS "-O2"
+)
+
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # RTT 上行通道数：MCU / FPGA / COMM / ANGLE 共 4 条

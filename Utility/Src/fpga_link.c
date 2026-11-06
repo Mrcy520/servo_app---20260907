@@ -75,6 +75,53 @@ volatile uint32_t g_fpga_busy_us_min = 0xFFFFFFFFu;
 volatile uint32_t g_fpga_busy_us_max;
 volatile uint32_t g_fpga_sck_khz;
 
+/* SPI 占用窗口的分段测量（DWT）：
+ *   busy = s_ts_start → 完成回调      整个"下个同步沿会被拒绝"的窗口
+ *   hal  = 发起 → HAL 调用返回         纯软件开销（-O0 下 HAL 入口 + DMA 启动）
+ * 于是  传输 + 中断延迟 = busy - hal，可直接判断慢在硬件还是慢在软件。
+ * 若 hal 很小而 busy 仍 ~51 µs，说明 SCK 实际没跑到 9 MHz；
+ * 若 hal 就占 20 µs 以上，则是 -O0 下 HAL 调用自身的开销，需绕开 HAL。 */
+volatile uint32_t g_fpga_hal_us_min = 0xFFFFFFFFu;
+volatile uint32_t g_fpga_hal_us_max;
+
+/* 被拒绝那一刻"距上次发起过了多久"（µs）。这是区分两种丢帧原因的唯一判据：
+ *   ≈ 60~62  → 上次交换跑满了一整个周期，说明窗口太长（要压软件开销）；
+ *   ≈ 20~30  → 沿在交换还没做完时就来了，说明沿间隔本身短于 62.5 µs
+ *              （FPGA 侧抖动，或本次沿自身被中断延迟推后），压窗口无用。
+ * 只看 ovr 计数永远分不开这两类，故单独记 min/max。 */
+volatile uint32_t g_fpga_rej_us_min = 0xFFFFFFFFu;
+volatile uint32_t g_fpga_rej_us_max;
+
+/* 同步沿间隔直方图（每 5 s 由诊断层取走并清零）。
+ * 稳态 16 kHz = 62.5 µs，样本应几乎全部落在 56~72 这一档。
+ * 若出现大量 <40 µs 的样本，说明"沿与沿之间"本身就不均匀（FPGA 抖动，
+ * 或中断延迟抖动），此时单靠压缩 SPI 窗口无法做到零丢帧——
+ * 这一条把"能不能追上"和"追得慢"两件事分开，避免继续凭 spi 数值猜。 */
+static volatile uint16_t s_sync_hist[FPGA_SYNC_HIST_N];
+
+static void FpgaLink_HistAdd(uint32_t us)
+{
+    uint8_t i;
+
+    if (us < 20u) {
+        i = 0u;
+    } else if (us < 40u) {
+        i = 1u;
+    } else if (us < 56u) {
+        i = 2u;
+    } else if (us < 72u) {
+        i = 3u;
+    } else if (us < 88u) {
+        i = 4u;
+    } else {
+        i = 5u;
+    }
+
+    if (s_sync_hist[i] != 0xFFFFu) {
+        s_sync_hist[i]++;
+    }
+}
+
 static volatile uint8_t  s_dwt_ok;
 static volatile uint32_t s_ts_prev_edge; /* 上一次同步沿的时间戳 */
 static volatile uint32_t s_ts_start;     /* 本次发起 DMA 前的时刻 */
@@ -132,6 +179,11 @@ void FpgaLink_Init(void)
     g_fpga_sync_us_max = 0u;
     g_fpga_busy_us_min = 0xFFFFFFFFu;
     g_fpga_busy_us_max = 0u;
+    g_fpga_hal_us_min  = 0xFFFFFFFFu;
+    g_fpga_hal_us_max  = 0u;
+    g_fpga_rej_us_min  = 0xFFFFFFFFu;
+    g_fpga_rej_us_max  = 0u;
+    (void)memset((void*)s_sync_hist, 0, sizeof(s_sync_hist));
     g_fpga_recover     = 0u;
     g_fpga_err_detail  = 0u;
 
@@ -148,9 +200,11 @@ void FpgaLink_Init(void)
 #endif
 
 #if FPGA_LINK_DISABLE_NSSP
-    /* 可选：关掉 NSSP（每字节之间插 NSS 脉冲，实测让 32B 交换由 28.4 µs 翻到 56 µs）。
-     * 默认关闭此选项——它会改变线上时序，而 FPGA 是否依赖逐字节 NSS 尚未验证；
-     * 先用下面的倍频方案把余量补回来。 */
+    /* 【已实测否证，默认关闭，勿再打开】
+     * 曾假设 spi_min=58 µs（理论 28.4 的 2 倍）来自 NSSP 每字节插 NSS 脉冲。
+     * 实测关闭 NSSP 后：spi_min 只从 58 降到 51（不是 29），且 FPGA 立刻不再
+     * 驱动 MISO——[WIN] 变成 32 个 0xAA、rx=0、err=slip=cycle。
+     * 结论：① 翻倍不是 NSSP 造成的；② 该 FPGA 依赖 NSS 边沿分帧，NSSP 不能关。 */
     CLEAR_BIT(SPI3->CR2, SPI_CR2_NSSP);
     hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
 #endif
@@ -224,9 +278,15 @@ void FpgaLink_SetCommand(const fpga_cmd_t* cmd)
         return;
     }
 
-    /* 写非活动缓冲，再原子切换下标：中断读到的始终是完整帧 */
+    /* 写非活动缓冲，再原子切换下标：中断读到的始终是完整帧。
+     * 本文件编成 -O2（见 CMakeLists），编译器可能把 pack_cmd 的写回
+     * 重排到 s_tx_active 之后，那样中断会读到"一半旧一半新"的帧。
+     * 这里插一条编译屏障强制顺序（只需挡住编译器，不需要关中断）。 */
     next = (uint8_t)(s_tx_active ^ 1u);
     fpga_pack_cmd(s_tx_buf[next], cmd);
+
+    __asm__ volatile("" ::: "memory");
+
     s_tx_active = next;
 }
 
@@ -286,6 +346,8 @@ static void FpgaLink_StartExchange(void)
             if (us > g_fpga_sync_us_max) {
                 g_fpga_sync_us_max = us;
             }
+
+            FpgaLink_HistAdd(us);
         }
         s_ts_prev_edge = now;
     }
@@ -294,6 +356,17 @@ static void FpgaLink_StartExchange(void)
         /* 正常的"上一帧还没收完"：跳过本周期，等下一个同步沿。
          * 但若"忙"已经持续远超一个周期（DMA 中断丢失、SPI 状态机卡住），
          * 就强制复位——否则链路会静默死掉：cycle 不再增长、ovr 每秒 +16000。 */
+        if (s_dwt_ok != 0u) {
+            uint32_t el = FPGA_CYC_TO_US(now - s_ts_start);
+
+            if (el < g_fpga_rej_us_min) {
+                g_fpga_rej_us_min = el;
+            }
+            if (el > g_fpga_rej_us_max) {
+                g_fpga_rej_us_max = el;
+            }
+        }
+
         if ((s_dwt_ok != 0u) && (FPGA_CYC_TO_US(now - s_ts_start) > FPGA_LINK_STUCK_US)) {
             FpgaLink_RecoverSpi();
         } else {
@@ -312,6 +385,17 @@ static void FpgaLink_StartExchange(void)
     {
         HAL_StatusTypeDef st = HAL_SPI_TransmitReceive_DMA(&hspi3, s_tx_local, s_rx_win,
                                                            (uint16_t)FPGA_FRAME_LEN);
+
+        if (s_dwt_ok != 0u) {
+            uint32_t us = FPGA_CYC_TO_US(DWT->CYCCNT - s_ts_start);
+
+            if (us < g_fpga_hal_us_min) {
+                g_fpga_hal_us_min = us;
+            }
+            if (us > g_fpga_hal_us_max) {
+                g_fpga_hal_us_max = us;
+            }
+        }
 
         if (st != HAL_OK) {
             g_fpga_err++;
@@ -520,6 +604,34 @@ uint8_t FpgaLink_GetLastTx(uint8_t* out)
     }
 
     return 1u;
+}
+
+uint8_t FpgaLink_TakeSyncHist(uint16_t* out)
+{
+    uint32_t primask;
+    uint8_t  i;
+    uint8_t  any = 0u;
+
+    if (out == NULL) {
+        return 0u;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    for (i = 0u; i < (uint8_t)FPGA_SYNC_HIST_N; i++) {
+        out[i] = s_sync_hist[i];
+        if (s_sync_hist[i] != 0u) {
+            any = 1u;
+        }
+        s_sync_hist[i] = 0u; /* 取走即清零，得到的是"最近一个窗口"的分布 */
+    }
+
+    if (primask == 0u) {
+        __enable_irq();
+    }
+
+    return any;
 }
 
 uint8_t FpgaLink_Alive(void)

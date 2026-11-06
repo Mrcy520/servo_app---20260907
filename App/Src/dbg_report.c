@@ -455,14 +455,35 @@ static void Dbg_PrintStat(void)
     Log_LineInit(&ln);
     Log_LineAdd(&ln,
                 "[ST] cycle=%lu rx=%lu err=%lu rec=%lu e=0x%08lX slip=%lu ovr=%lu req_err=%lu | "
-                "spi=%lu/%luus sck=%lukHz sync=%lu/%luus",
+                "spi=%lu/%luus hal=%lu/%luus sck=%lukHz sync=%lu/%luus rej=%lu/%luus",
                 (unsigned long)g_fpga_cycle, (unsigned long)g_fpga_rx_cnt,
                 (unsigned long)g_fpga_err, (unsigned long)g_fpga_recover,
                 (unsigned long)g_fpga_err_detail, (unsigned long)g_fpga_slip,
                 (unsigned long)g_fpga_overrun, (unsigned long)g_fpga_req_err,
                 DBG_US(g_fpga_busy_us_min), DBG_US(g_fpga_busy_us_max),
+                DBG_US(g_fpga_hal_us_min), DBG_US(g_fpga_hal_us_max),
                 (unsigned long)g_fpga_sck_khz, DBG_US(g_fpga_sync_us_min),
-                DBG_US(g_fpga_sync_us_max));
+                DBG_US(g_fpga_sync_us_max), DBG_US(g_fpga_rej_us_min),
+                DBG_US(g_fpga_rej_us_max));
+    (void)Log_LineSend(&ln, LOG_CH_FPGA);
+}
+
+/* 同步沿间隔分布（每 5 s 一行，只在该窗口内有样本时才打印）：
+ * 稳态 16 kHz 应几乎全落在 56-72 档。若 <20 / 20-40 档占比可观，
+ * 说明沿与沿之间本身就不均匀——那时压缩 SPI 窗口也不可能做到零丢帧。 */
+static void Dbg_PrintSyncHist(void)
+{
+    log_line_t ln;
+    uint16_t   h[FPGA_SYNC_HIST_N];
+
+    if (FpgaLink_TakeSyncHist(h) == 0u) {
+        return;
+    }
+
+    Log_LineInit(&ln);
+    Log_LineAdd(&ln, "[SH] sync(us) <20:%u 20-40:%u 40-56:%u 56-72:%u 72-88:%u >=88:%u",
+                (unsigned)h[0], (unsigned)h[1], (unsigned)h[2], (unsigned)h[3],
+                (unsigned)h[4], (unsigned)h[5]);
     (void)Log_LineSend(&ln, LOG_CH_FPGA);
 }
 
@@ -627,6 +648,10 @@ void Dbg_Poll(void)
         s_stat_tick = now;
         Dbg_PrintStat();
         Dbg_PrintRawFrame(); /* TX/WIN 对照 */
+
+        /* 同步沿分布：与 [ST] 同频（1 Hz）。原来是 5 s，现场常常只抓几秒，
+         * 抓不到就白等一轮——诊断数据必须每次都落在窗口里。 */
+        Dbg_PrintSyncHist();
     }
 }
 
