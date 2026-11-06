@@ -58,6 +58,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Utility/Src/crc.c
     Utility/Src/nvm.c
     Utility/Src/rtt.c
+    Utility/Src/rtt_log.c
 )
 
 # Add include paths
@@ -69,7 +70,14 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined symbols
+    # RTT 上行通道数：MCU / FPGA / COMM / ANGLE 共 4 条
+    # （新增通道须同步 Utility/Inc/rtt_log.h 的 log_chan_t 与 LOG_CH_COUNT）
+    RTT_NUM_UP_BUFFERS=4u
+    # RTT 格式化器的浮点分支：本工程日志全部用整型输出（角度也按
+    # "angle:%lu.%03lu" 拆分整数与千分位，输出与 %.3f 逐字节一致），
+    # 因此关闭浮点分支，省掉软件 double 运算（实测约 3.3 KB Flash）。
+    # 若日后确实需要 rtt_printf("%f")，把这里改回 1。
+    RTT_PRINTF_SUPPORT_FLOAT=0
 )
 
 # Remove wrong libob.a library dependency when using cpp files
@@ -83,6 +91,12 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 )
 
 # 由 STM32 CubeMX Companion 添加：构建选项与环境配置
+#
+# 已移除 -Wl,-u,_printf_float：
+#   该选项强制链接 newlib 的浮点 printf 支持，连带把整套 vfprintf 拉进镜像
+#   （实测 +14.7 KB Flash）。本工程没有任何地方用 printf 打印 %f——
+#   日志走 rtt.c 自带的格式化器（且 RTT_PRINTF_SUPPORT_FLOAT=0）。
+#   若日后确实需要 printf("%f")，恢复下面这行即可（代价约 +15 KB Flash）。
 target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
-    -Wl,-u,_printf_float
+    #-Wl,-u,_printf_float
 )

@@ -21,6 +21,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #if defined(__ICCARM__)
 #include <intrinsics.h>
@@ -205,34 +206,57 @@ static void rtt_memory_barrier(void)
 
 /* ======================== 最小 libc 替代 ======================== */
 
-/* 使用 volatile 指针，避免编译器把这些循环识别成 memcpy/memset/strlen 调用 */
+/*
+ * 这里原本是逐字节 + volatile 的手写循环（为了不引入 libc）。实测在本工程
+ * 16 kHz SPI 同步的场景下有问题：写环形缓冲时是**关中断**的，逐字节 volatile
+ * 在 -O0 下约 10 个周期/字节，一行 150 字节就要屏蔽中断 ~20 µs；Dbg_Poll 一次
+ * 连写 [FP]/[ANG]/[RAW] 三行可达 ~50 µs，直接把 62.5 µs 周期里的 EXTI 推迟到
+ * 下一个周期，造成 ovr 增长（现场实测同步沿间隔在 14~131 µs 之间抖动）。
+ *
+ * 改用 libc 的 memcpy/memset：同样是"不依赖 HAL/RTOS"，但内部按字搬运，
+ * 512 字节上限的关中断时间从 ~40 µs 降到 ~5 µs。工程本就在用 string.h。
+ */
+#define RTT_USE_LIBC_MEM 1
+
 static void rtt_mem_set(void* dst, unsigned char value, unsigned len)
 {
+#if RTT_USE_LIBC_MEM
+    (void)memset(dst, (int)value, (size_t)len);
+#else
     volatile unsigned char* p = (volatile unsigned char*)dst;
     while (len != 0u) {
         *p++ = value;
         len--;
     }
+#endif
 }
 
 static void rtt_mem_copy(void* dst, const void* src, unsigned len)
 {
-    volatile unsigned char* d = (volatile unsigned char*)dst;
+#if RTT_USE_LIBC_MEM
+    (void)memcpy(dst, src, (size_t)len);
+#else
+    volatile unsigned char* d       = (volatile unsigned char*)dst;
     const volatile unsigned char* s = (const volatile unsigned char*)src;
     while (len != 0u) {
         *d++ = *s++;
         len--;
     }
+#endif
 }
 
 static unsigned rtt_str_len(const char* s)
 {
+#if RTT_USE_LIBC_MEM
+    return (unsigned)strlen(s);
+#else
     const volatile char* p = s;
     unsigned n = 0u;
     while (p[n] != '\0') {
         n++;
     }
     return n;
+#endif
 }
 
 #if RTT_PRINTF_SUPPORT_FLOAT
@@ -494,8 +518,10 @@ static void rtt_w_float(rtt_writer_t* w, double value,
 
 #endif /* RTT_PRINTF_SUPPORT_FLOAT */
 
-/* 核心格式化，返回写入 out 的字符数（可能因缓冲区不足被截断） */
-static unsigned rtt_format(char* out, unsigned cap, const char* fmt, va_list ap)
+/* 核心格式化，返回写入 out 的字符数（可能因缓冲区不足被截断）。
+ * 对外公开为 rtt_vformat()：让需要在本地拼整行的调用方（rtt_log）复用本格式化器，
+ * 从而不必为一个日志接口链接 newlib 的 printf（在 60 KB Flash 的器件上差 5 KB 量级）。 */
+unsigned rtt_vformat(char* out, unsigned cap, const char* fmt, va_list ap)
 {
     rtt_writer_t w;
 
@@ -942,7 +968,7 @@ unsigned rtt_printf_channel(unsigned channel, const char* fmt, ...)
     }
 
     va_start(ap, fmt);
-    n = rtt_format(buffer, RTT_PRINTF_BUFFER_SIZE, fmt, ap);
+    n = rtt_vformat(buffer, RTT_PRINTF_BUFFER_SIZE, fmt, ap);
     va_end(ap);
 
     /* 格式化在锁外完成，仅写入时关中断 */
@@ -962,7 +988,7 @@ unsigned rtt_printf(const char* fmt, ...)
     }
 
     va_start(ap, fmt);
-    n = rtt_format(buffer, RTT_PRINTF_BUFFER_SIZE, fmt, ap);
+    n = rtt_vformat(buffer, RTT_PRINTF_BUFFER_SIZE, fmt, ap);
     va_end(ap);
 
     return rtt_write_channel(0u, buffer, n);
@@ -1113,7 +1139,7 @@ static unsigned rtt_write_colored(unsigned channel, const char* fmt, va_list ap,
     unsigned body;
 
     rtt_mem_copy(buffer, prefix, prefix_len);
-    body = rtt_format(buffer + prefix_len, RTT_PRINTF_BUFFER_SIZE, fmt, ap);
+    body = rtt_vformat(buffer + prefix_len, RTT_PRINTF_BUFFER_SIZE, fmt, ap);
 
     prefix_len += body;
     buffer[prefix_len++] = 0x1B;

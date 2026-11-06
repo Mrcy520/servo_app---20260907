@@ -29,9 +29,10 @@
 
 #include <stdio.h>
 #include "rtt.h"
+#include "rtt_log.h"    /* 多通道日志：ch0 MCU / ch1 FPGA / ch2 COMM */
 #include "comm_app.h"   /* 应用层入口；协议层位于 Utility/comm_proto.h */
 #include "fpga_app.h"   /* FPGA 执行器映射；链路层位于 Utility/fpga_link.h */
-#include "dbg_report.h" /* 调试上报：COMM_DEBUG_REPORT=1 时输出文本日志 */
+#include "dbg_report.h" /* 调试上报：COMM_DEBUG_REPORT=1 时按通道输出日志 */
 
 /* USER CODE END Includes */
 
@@ -75,7 +76,9 @@ int main(void)
 {
     /* USER CODE BEGIN 1 */
 
-    rtt_init();
+    /* RTT 初始化 + 通道命名（ch0 MCU / ch1 FPGA / ch2 COMM）。
+     * 放在最前面：之后任何 printf 都会落到 MCU 通道，不再占用 USART1。 */
+    Log_Init();
 
     /* USER CODE END 1 */
 

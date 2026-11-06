@@ -36,6 +36,15 @@ static uint8_t s_rx_win[FPGA_FRAME_LEN];
 static fpga_rx_t s_rx;
 static volatile uint8_t s_rx_valid;
 
+/* 最近一帧被接受的原始字节（供现场核对量纲/字节序，见 FpgaLink_GetRawRx） */
+static uint8_t s_raw_frame[FPGA_FRAME_LEN];
+
+/* 最近一个 DMA 窗口的原始字节，**不论是否解出帧头**。
+ * 链路完全收不到有效帧时（rx=0、slip 疯涨），这才是唯一能说明问题的数据：
+ * 全 0x00/0xFF 表示 FPGA 根本没驱动 MISO；有数据但无 0xAA55 表示错位或时序不符。 */
+static uint8_t s_last_win[FPGA_FRAME_LEN];
+static volatile uint8_t s_last_win_valid;
+
 /* 滑窗重同步缓冲：s_rd..s_wr 为尚未消费的字节 */
 static uint8_t s_stream[FPGA_FRAME_LEN * 2u];
 static uint8_t s_rd;
@@ -49,6 +58,28 @@ volatile uint32_t g_fpga_slip;
 volatile uint32_t g_fpga_overrun;
 volatile uint32_t g_fpga_ack_cnt;
 volatile uint8_t g_fpga_ack_state;
+volatile uint32_t g_fpga_recover; /* SPI 状态机被强制复位的次数（自愈计数） */
+
+/* 最近一次发起失败的现场快照，按字节打包：
+ *   bit7:0   HAL_SPI_TransmitReceive_DMA 的返回码（HAL_OK=0/BUSY=2/ERROR=1/TIMEOUT=3）
+ *   bit15:8  hspi3.State
+ *   bit23:16 hspi3.Lock
+ *   bit31:24 hspi3.hdmarx->State
+ * 有了它就不必再猜"为什么 HAL 返回失败"。 */
+volatile uint32_t g_fpga_err_detail;
+
+/* 时序诊断（DWT 周期计数器） */
+volatile uint32_t g_fpga_sync_us_min = 0xFFFFFFFFu;
+volatile uint32_t g_fpga_sync_us_max;
+volatile uint32_t g_fpga_busy_us_min = 0xFFFFFFFFu;
+volatile uint32_t g_fpga_busy_us_max;
+volatile uint32_t g_fpga_sck_khz;
+
+static volatile uint8_t  s_dwt_ok;
+static volatile uint32_t s_ts_prev_edge; /* 上一次同步沿的时间戳 */
+static volatile uint32_t s_ts_start;     /* 本次发起 DMA 前的时刻 */
+
+#define FPGA_CYC_TO_US(cyc) ((uint32_t)((cyc) / (SystemCoreClock / 1000000u)))
 
 /* 最近一次有效帧所处的周期号 */
 static volatile uint32_t s_last_rx_cycle;
@@ -57,6 +88,12 @@ static volatile uint32_t s_last_rx_cycle;
 static void FpgaLink_StartExchange(void);
 static void FpgaLink_RxWindow(const uint8_t* win);
 static void FpgaLink_Parse(const uint8_t* frame);
+static void FpgaLink_RecoverSpi(void);
+
+/* 一次传输被判定"卡死"的门限：8 个同步周期。超过就强制复位 SPI/DMA。
+ * 没有这条自愈路径时，任何一次失败都会让链路永久死亡（cycle 不再增长、
+ * ovr 每秒 +16000），现场只能靠复位恢复。 */
+#define FPGA_LINK_STUCK_US 500u
 
 /* -------------------------------------------------------------------------- */
 /* 初始化                                                                      */
@@ -82,6 +119,85 @@ void FpgaLink_Init(void)
     g_fpga_ack_state = 0u;
 
     s_last_rx_cycle = 0u;
+
+    /* 时序诊断：打开 DWT 周期计数器（Cortex-M4 内核自带，零额外硬件） */
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT       = 0u;
+    DWT->CTRL        |= DWT_CTRL_CYCCNTENA_Msk;
+    s_dwt_ok          = 1u;
+
+    s_ts_prev_edge    = 0u;
+    s_ts_start        = DWT->CYCCNT; /* 不能留 0，否则首个沿会误判"卡死" */
+    g_fpga_sync_us_min = 0xFFFFFFFFu;
+    g_fpga_sync_us_max = 0u;
+    g_fpga_busy_us_min = 0xFFFFFFFFu;
+    g_fpga_busy_us_max = 0u;
+    g_fpga_recover     = 0u;
+    g_fpga_err_detail  = 0u;
+
+    /* ===== 时序参数就地改写 =====
+     * 这里**只改寄存器**，绝不调用 HAL_SPI_Init()：实测完整重初始化会把 HAL 的
+     * 状态机打乱——首次传输再也回不来（cycle 停在 1、rx=0、spi 无样本），
+     * 之后每个同步沿都被"忙"拒绝，链路永久死亡。此刻 SPI 尚未使能，直接改位域是安全的。 */
+
+#ifndef FPGA_LINK_DISABLE_NSSP
+#define FPGA_LINK_DISABLE_NSSP 0
+#endif
+#ifndef FPGA_LINK_SCK_DIV2
+#define FPGA_LINK_SCK_DIV2 0
+#endif
+
+#if FPGA_LINK_DISABLE_NSSP
+    /* 可选：关掉 NSSP（每字节之间插 NSS 脉冲，实测让 32B 交换由 28.4 µs 翻到 56 µs）。
+     * 默认关闭此选项——它会改变线上时序，而 FPGA 是否依赖逐字节 NSS 尚未验证；
+     * 先用下面的倍频方案把余量补回来。 */
+    CLEAR_BIT(SPI3->CR2, SPI_CR2_NSSP);
+    hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+#endif
+
+#if FPGA_LINK_SCK_DIV2
+    /* 把 SCK 从 PCLK1/4 提到 PCLK1/2（9 MHz → 18 MHz）。
+     * 依据：接口文档写明 SPI 按 30 MHz 设计，18 MHz 在 FPGA 能力之内，
+     * 且 STM32F302 的 SPI 上限正是 PCLK1/2。
+     * 实测警告：18 MHz 下 HAL_SPI_TransmitReceive_DMA 每次同步返回失败
+     * （cycle 与 err 1:1、rx=0），原因待查——先看 [ST] 的 e= 字段再决定。
+     * 因此默认关闭，先用 9 MHz 保证链路通。 */
+    MODIFY_REG(SPI3->CR1, SPI_CR1_BR, SPI_BAUDRATEPRESCALER_2);
+    hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+#endif
+
+    /* 中断优先级在这里设置，而不是改 CubeMX 生成的 gpio.c / spi.c（重新生成会被覆盖）。
+     *
+     * EXTI（同步沿）必须与 DMA 同级或更高：原先是 DMA=0 / EXTI=2，
+     * 一旦 DMA 完成中断正在执行，同步沿会被推迟，交换窗口整体后移，
+     * 进而挤到下个周期造成 overrun。两条 ISR 都很短，同级不会互相饿死。
+     *
+     * SPI3 的错误中断必须打开：HAL_SPI_TransmitReceive_DMA 使能了 SPI_IT_ERR，
+     * 但原工程从未在 NVIC 里使能 SPI3_IRQn，导致 OVR/MODF 发生时
+     * HAL_SPI_ErrorCallback 永远不执行、标志也清不掉。 */
+    HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
+
+    /* SPI3 错误中断：恢复为 10:51 那个可用版本的配置（使能）。
+     * 它会执行 HAL_SPI_ErrorCallback → 清 OVR 标志。若 NVIC 不使能，
+     * 溢出标志一旦置位就没人清，后续接收数据会被持续破坏。 */
+#ifndef FPGA_LINK_SPI_ERR_IRQ
+#define FPGA_LINK_SPI_ERR_IRQ 1
+#endif
+
+#if FPGA_LINK_SPI_ERR_IRQ
+    HAL_NVIC_SetPriority(SPI3_IRQn, 1, 0);
+    HAL_NVIC_EnableIRQ(SPI3_IRQn);
+#endif
+
+    /* 现场读出 SCK 实际频率：CR1.BR 的编码是 0=/2、1=/4、2=/8 …
+     * 只信寄存器，不按 CubeMX 里的分频值推算（时钟源可能与预期不同）。 */
+    {
+        uint32_t br = (SPI3->CR1 & SPI_CR1_BR) >> SPI_CR1_BR_Pos;
+
+        g_fpga_sck_khz = (HAL_RCC_GetPCLK1Freq() >> (br + 1u)) / 1000u;
+    }
 
     /* 安全空闲帧：正常通讯 + 等待（关闭使能） */
     (void)memset(&idle, 0, sizeof(idle));
@@ -115,15 +231,74 @@ void FpgaLink_SetCommand(const fpga_cmd_t* cmd)
 }
 
 /**
+ * @brief 强制复位 SPI3 / DMA 状态机（自愈）
+ * @note  运行于 EXTI 中断（优先级 0），**只能用纯寄存器操作**。
+ *
+ * 这里绝对不能用 HAL_DMA_Abort()：HAL 的 Abort 用 HAL_GetTick() 做超时轮询，
+ * 而本函数在最高优先级中断里执行，SysTick（优先级最低）无法抢占，
+ * tick 永远不前进 —— 只要 EN 位没有立刻清零就会死循环，整个系统原地卡死。
+ * 现场已复现：烧录后打印到 "-- event --" 就再无输出。
+ */
+static void FpgaLink_RecoverSpi(void)
+{
+    if (hspi3.hdmarx != NULL) {
+        __HAL_DMA_DISABLE(hspi3.hdmarx);
+        hspi3.hdmarx->State = HAL_DMA_STATE_READY;
+    }
+    if (hspi3.hdmatx != NULL) {
+        __HAL_DMA_DISABLE(hspi3.hdmatx);
+        hspi3.hdmatx->State = HAL_DMA_STATE_READY;
+    }
+
+    __HAL_SPI_DISABLE(&hspi3);
+    /* 完整静默：只关 SPE 不够——上次中断的传输会把 TXDMAEN/RXDMAEN 和 ERR 中断
+     * 留在使能状态，下一次发起时会立刻带上陈旧的 DMA 请求与错误标志。 */
+    CLEAR_BIT(SPI3->CR2, SPI_CR2_TXDMAEN | SPI_CR2_RXDMAEN | SPI_CR2_ERRIE);
+    __HAL_SPI_CLEAR_OVRFLAG(&hspi3);
+
+    hspi3.State     = HAL_SPI_STATE_READY;
+    hspi3.ErrorCode = HAL_SPI_ERROR_NONE;
+
+    /* 流缓冲可能停在半帧，交给下一窗口的帧头搜索自恢复 */
+    s_rd = 0u;
+    s_wr = 0u;
+
+    g_fpga_recover++;
+}
+
+/**
  * @brief 帧同步沿到：发起一次 32 字节全双工交换
  * @note  运行于 EXTI 中断
  */
 static void FpgaLink_StartExchange(void)
 {
-    /* 上一周期尚未收完（正常不会发生：28.4 µs 传输 << 62.5 µs 周期），
-     * 说明链路异常，跳过本周期而不打断进行中的 DMA，避免 SPI 状态错乱 */
+    uint32_t now = (s_dwt_ok != 0u) ? DWT->CYCCNT : 0u;
+
+    if (s_dwt_ok != 0u) {
+        uint32_t d = now - s_ts_prev_edge; /* 无符号减法，跨 32 位回绕也正确 */
+
+        if (s_ts_prev_edge != 0u) {
+            uint32_t us = FPGA_CYC_TO_US(d);
+
+            if (us < g_fpga_sync_us_min) {
+                g_fpga_sync_us_min = us;
+            }
+            if (us > g_fpga_sync_us_max) {
+                g_fpga_sync_us_max = us;
+            }
+        }
+        s_ts_prev_edge = now;
+    }
+
     if (hspi3.State != HAL_SPI_STATE_READY) {
-        g_fpga_overrun++;
+        /* 正常的"上一帧还没收完"：跳过本周期，等下一个同步沿。
+         * 但若"忙"已经持续远超一个周期（DMA 中断丢失、SPI 状态机卡住），
+         * 就强制复位——否则链路会静默死掉：cycle 不再增长、ovr 每秒 +16000。 */
+        if ((s_dwt_ok != 0u) && (FPGA_CYC_TO_US(now - s_ts_start) > FPGA_LINK_STUCK_US)) {
+            FpgaLink_RecoverSpi();
+        } else {
+            g_fpga_overrun++;
+        }
         return;
     }
 
@@ -131,9 +306,24 @@ static void FpgaLink_StartExchange(void)
 
     g_fpga_cycle++;
 
-    if (HAL_SPI_TransmitReceive_DMA(&hspi3, s_tx_local, s_rx_win, (uint16_t)FPGA_FRAME_LEN) !=
-        HAL_OK) {
-        g_fpga_err++;
+    /* 记录发起时刻，用于统计"SPI 占用窗口"——这才是决定会不会丢帧的量 */
+    s_ts_start = now;
+
+    {
+        HAL_StatusTypeDef st = HAL_SPI_TransmitReceive_DMA(&hspi3, s_tx_local, s_rx_win,
+                                                           (uint16_t)FPGA_FRAME_LEN);
+
+        if (st != HAL_OK) {
+            g_fpga_err++;
+            g_fpga_err_detail = ((uint32_t)st & 0xFFu) | (((uint32_t)hspi3.State & 0xFFu) << 8) |
+                                (((uint32_t)hspi3.Lock & 0xFFu) << 16) |
+                                (((uint32_t)((hspi3.hdmarx != NULL) ? hspi3.hdmarx->State : 0xFFu)
+                                  & 0xFFu)
+                                 << 24);
+            /* HAL 失败路径会把 State 留在 BUSY_xxx，而完成回调永远不会来。
+             * 不在这里复位，第一次失败就等于链路永久死亡。 */
+            FpgaLink_RecoverSpi();
+        }
     }
 }
 
@@ -148,6 +338,10 @@ static void FpgaLink_StartExchange(void)
 static void FpgaLink_RxWindow(const uint8_t* win)
 {
     uint16_t i;
+
+    /* 先留原始窗口：解不出帧时它是唯一的现场证据 */
+    (void)memcpy(s_last_win, win, FPGA_FRAME_LEN);
+    s_last_win_valid = 1u;
 
     /* 缓冲回绕时先搬移未消费字节 */
     if (((uint16_t)s_wr + (uint16_t)FPGA_FRAME_LEN) > (uint16_t)sizeof(s_stream)) {
@@ -227,6 +421,9 @@ static void FpgaLink_Parse(const uint8_t* frame)
     s_last_rx_cycle = g_fpga_cycle;
     g_fpga_rx_cnt++;
 
+    /* 保留原始字节：调试层可按线上字节核对量纲，而不是看解码后的结构体 */
+    (void)memcpy(s_raw_frame, frame, FPGA_FRAME_LEN);
+
     /* 非实时响应（0x02/0x03/0x04）单独计数：应用层据此判定请求已回应 */
     if (s_rx.state != FPGA_ST_COMM) {
         g_fpga_ack_state = s_rx.state;
@@ -259,6 +456,70 @@ uint8_t FpgaLink_GetRx(fpga_rx_t* out)
     }
 
     return valid;
+}
+
+uint8_t FpgaLink_GetRawRx(uint8_t* out)
+{
+    uint8_t valid;
+    uint32_t primask;
+
+    if (out == NULL) {
+        return 0u;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    (void)memcpy(out, s_raw_frame, FPGA_FRAME_LEN);
+    valid = s_rx_valid;
+
+    if (primask == 0u) {
+        __enable_irq();
+    }
+
+    return valid;
+}
+
+uint8_t FpgaLink_GetLastWindow(uint8_t* out)
+{
+    uint8_t valid;
+    uint32_t primask;
+
+    if (out == NULL) {
+        return 0u;
+    }
+
+    primask = __get_PRIMASK();
+    __disable_irq();
+
+    (void)memcpy(out, s_last_win, FPGA_FRAME_LEN);
+    valid = s_last_win_valid;
+
+    if (primask == 0u) {
+        __enable_irq();
+    }
+
+    return valid;
+}
+
+uint8_t FpgaLink_GetLastTx(uint8_t* out)
+{
+    if (out == NULL) {
+        return 0u;
+    }
+
+    /* 中断里会改写 s_tx_local，拷贝期间关一下中断（32 字节，代价可忽略） */
+    {
+        uint32_t primask = __get_PRIMASK();
+
+        __disable_irq();
+        (void)memcpy(out, s_tx_local, FPGA_FRAME_LEN);
+        if (primask == 0u) {
+            __enable_irq();
+        }
+    }
+
+    return 1u;
 }
 
 uint8_t FpgaLink_Alive(void)
@@ -294,7 +555,32 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef* hspi)
         return;
     }
 
+    /* 先结算时序：此刻 HAL 已把 State 置回 READY，
+     * 所以这里量到的就是"SPI 被占用、下个同步沿会被拒绝"的真实窗口 */
+    if (s_dwt_ok != 0u) {
+        uint32_t us = FPGA_CYC_TO_US(DWT->CYCCNT - s_ts_start);
+
+        if (us < g_fpga_busy_us_min) {
+            g_fpga_busy_us_min = us;
+        }
+        if (us > g_fpga_busy_us_max) {
+            g_fpga_busy_us_max = us;
+        }
+    }
+
     FpgaLink_RxWindow(s_rx_win);
+}
+
+/**
+ * @brief SPI3 中断入口
+ * @note  只为错误路径服务：HAL_SPI_TransmitReceive_DMA 使能了 SPI_IT_ERR，
+ *        没有这个入口时 OVR/MODF 只会挂起而永远处理不到。
+ *        若日后在 CubeMX 里勾选了 SPI3 全局中断，会与 stm32f3xx_it.c 的生成版本
+ *        重名，届时删掉本函数即可（本函数只是转调 HAL_SPI_IRQHandler）。
+ */
+void SPI3_IRQHandler(void)
+{
+    HAL_SPI_IRQHandler(&hspi3);
 }
 
 /**

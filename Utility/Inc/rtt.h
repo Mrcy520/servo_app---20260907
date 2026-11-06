@@ -26,6 +26,8 @@
 #ifndef RTT_H
 #define RTT_H
 
+#include <stdarg.h>
+
 /* ============================ 可配置项 ============================
  * 可在工程编译宏中覆盖（例如 -DRTT_NUM_UP_BUFFERS=2u），无需改动源码。
  */
@@ -144,6 +146,18 @@ unsigned rtt_printf(const char* fmt, ...);
  * @brief  格式化输出到指定上行通道
  */
 unsigned rtt_printf_channel(unsigned channel, const char* fmt, ...);
+
+/**
+ * @brief  把格式化结果写入调用方提供的缓冲区（不经过环形缓冲，不发送）
+ * @param  out  目标缓冲区
+ * @param  cap  缓冲区容量（含结尾 '\0'）
+ * @param  fmt  格式串，语义与 rtt_printf 相同
+ * @param  ap   已初始化的参数列表
+ * @retval 实际写入的字符数（不含 '\0'）；等于 cap-1 时表示可能被截断
+ * @note   供需要在本地拼装整行、再一次性提交的调用方使用（如 rtt_log），
+ *         复用本文件自带的格式化器，避免为一个日志接口拉入 newlib printf。
+ */
+unsigned rtt_vformat(char* out, unsigned cap, const char* fmt, va_list ap);
 
 /* ------------------------------ ANSI 着色 ------------------------------ */
 #if RTT_SUPPORT_ANSI

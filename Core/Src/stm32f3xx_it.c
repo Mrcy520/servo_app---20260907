@@ -91,7 +91,12 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  /* 把故障状态打到 RTT（实现在 App/Src/dbg_report.c）。
+   * 只读寄存器 + 一次内存拷贝，不会引入二次故障。 */
+  {
+    extern void Dbg_OnHardFault(void);
+    Dbg_OnHardFault();
+  }
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
