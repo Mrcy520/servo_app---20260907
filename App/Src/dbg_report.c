@@ -56,6 +56,16 @@ static uint8_t s_dn_valid;
 static uint8_t s_fp_valid;
 static uint8_t s_pr_valid;
 
+/* 角度流的状态：上一次 cal 值（突变检测）、故障帧跳过计数、突变次数 */
+static uint32_t s_ang_cal_prev;
+static uint8_t  s_ang_cal_valid;
+static uint32_t s_ang_fault_cnt;
+static uint32_t s_ang_jump_cnt;
+
+/* 相邻两次角度采样（2 ms）之间允许的最大变化：20 度。
+ * 2 ms 内转过 20 度相当于 10 000 °/s，机械上不可能，超过即判为异常帧。 */
+#define DBG_ANGLE_JUMP_MDEG 20000u
+
 static uint32_t s_dn_cnt;
 static uint32_t s_pr_cnt;
 
@@ -329,10 +339,8 @@ static void Dbg_PrintFpga(uint32_t now)
 static void Dbg_PrintAngle(void)
 {
     log_line_t ln;
-    fpga_rx_t rx;
-    uint32_t mdeg15;
-    uint32_t mdeg18;
-    uint32_t mdegCal;
+    fpga_rx_t  rx;
+    uint32_t   mdegCal;
 
     if (s_fp_valid == 0u) {
         return;
@@ -347,20 +355,51 @@ static void Dbg_PrintAngle(void)
         return;
     }
 
-    /* 三种口径都用整数拆分输出（与 "%.3f" 逐字节一致，但不引入浮点：
-     * 省掉 rtt 的浮点分支与软件 double 运算，也不在采样路径上增加几十 µs 开销）。
-     * cal 为实测校准口径：raw = 0x870000 + 角度x8192，一圈跨越 0x2D0000。
-     * 15bit / 18bit 保留只为对照——实测两者都对不上真实机械角（见 fpga_proto.h 注释）。 */
-    mdeg15  = fpga_angle_to_mdeg(rx.angle_raw);
-    mdeg18  = fpga_angle_to_mdeg18(rx.angle_raw);
+    /* 【尖刺根因 1】编码器故障帧的角度不可信，必须挡掉。
+     * 实测同一台机：故障帧（enc=0x80）报 ang=319.529，而同刻正常帧是 279.058，
+     * 差 40° 以上。以前这里只过滤了 state，没过滤 enc_fault，于是这类帧的角度
+     * 被原样打进角度流，在曲线上就是孤立尖刺。协议语义里 enc_fault≠0 本身就表示
+     * 角度无效，因此这里直接跳过并计数，而不是去猜它的值。 */
+    if (rx.enc_fault != 0u) {
+        s_ang_fault_cnt++;
+        return;
+    }
+
     mdegCal = fpga_angle_to_mdeg_cal(rx.angle_raw);
 
+    /* 【尖刺根因 2 的取证】相邻两次采样间隔 2 ms，机械上不可能跳过 20°。
+     * 若仍然出现大跳变，说明是"干净解析出来但内容异常"的帧（FPGA 侧原因），
+     * 这里把该帧的 32 字节原始报文一起打出来，避免下次还要另抓 ch1 才能定因。 */
+    if (s_ang_cal_valid != 0u) {
+        uint32_t d = (mdegCal > s_ang_cal_prev) ? (mdegCal - s_ang_cal_prev)
+                                               : (s_ang_cal_prev - mdegCal);
+
+        if (d > DBG_ANGLE_JUMP_MDEG) {
+            uint8_t win[FPGA_FRAME_LEN];
+            uint8_t have = FpgaLink_GetLastWindow(win);
+
+            s_ang_jump_cnt++;
+
+            Log_LineInit(&ln);
+            Log_LineAdd(&ln, "[JMP] n=%lu ang=%lu.%03lu prev=%lu.%03lu raw=0x%06lX enc=0x%02X | ",
+                        (unsigned long)s_ang_jump_cnt, (unsigned long)(mdegCal / 1000u),
+                        (unsigned long)(mdegCal % 1000u), (unsigned long)(s_ang_cal_prev / 1000u),
+                        (unsigned long)(s_ang_cal_prev % 1000u), (unsigned long)rx.angle_raw,
+                        rx.enc_fault);
+            if (have != 0u) {
+                Log_LineAddHex(&ln, win, FPGA_FRAME_LEN);
+            } else {
+                Log_LineAdd(&ln, "(no window)");
+            }
+            (void)Log_LineSend(&ln, LOG_CH_FPGA);
+        }
+    }
+    s_ang_cal_prev  = mdegCal;
+    s_ang_cal_valid = 1u;
+
     Log_LineInit(&ln);
-    Log_LineAdd(&ln, "raw:0x%06lX,15bit:%lu.%03lu,18bit:%lu.%03lu,cal:%lu.%03lu",
-                (unsigned long)rx.angle_raw, (unsigned long)(mdeg15 / 1000u),
-                (unsigned long)(mdeg15 % 1000u), (unsigned long)(mdeg18 / 1000u),
-                (unsigned long)(mdeg18 % 1000u), (unsigned long)(mdegCal / 1000u),
-                (unsigned long)(mdegCal % 1000u));
+    Log_LineAdd(&ln, "ang:%lu.%03lu,raw:0x%06lX", (unsigned long)(mdegCal / 1000u),
+                (unsigned long)(mdegCal % 1000u), (unsigned long)rx.angle_raw);
     (void)Log_LineSend(&ln, LOG_CH_ANGLE);
 }
 
@@ -446,11 +485,12 @@ static void Dbg_PrintAngleDiag(void)
     Log_LineInit(&ln);
     Log_LineAdd(&ln,
                 "[ANG] raw=0x%06lX min=0x%06lX max=0x%06lX span=%lu | 1/2^15=%lu.%03lu "
-                "360/2^24=%lu.%03lu | fault=0x%02X over=%lu",
+                "360/2^24=%lu.%03lu | fault=0x%02X over=%lu skipF=%lu jump=%lu",
                 (unsigned long)rx.angle_raw, (unsigned long)s_ang_min, (unsigned long)s_ang_max,
                 (unsigned long)span, (unsigned long)(d15 / 1000u), (unsigned long)(d15 % 1000u),
                 (unsigned long)(d24 / 1000u), (unsigned long)(d24 % 1000u), rx.enc_fault,
-                (unsigned long)g_fpga_angle_over);
+                (unsigned long)g_fpga_angle_over, (unsigned long)s_ang_fault_cnt,
+                (unsigned long)s_ang_jump_cnt);
     (void)Log_LineSend(&ln, LOG_CH_FPGA);
 }
 
@@ -547,6 +587,11 @@ void Dbg_Init(void)
     s_ang_min  = 0u;
     s_ang_max  = 0u;
     s_ang_seen = 0u;
+
+    s_ang_cal_prev  = 0u;
+    s_ang_cal_valid = 0u;
+    s_ang_fault_cnt = 0u;
+    s_ang_jump_cnt  = 0u;
 
     s_prev_st   = 0xFFu;
     s_prev_ctrl = 0xFFu;

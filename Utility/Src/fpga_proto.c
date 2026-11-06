@@ -253,18 +253,6 @@ uint32_t fpga_angle_to_mdeg(uint32_t raw)
 }
 
 /**
- * @brief 角度码值 -> 千分之一度（18 位编码器口径）
- * @note  满圈 = 2^18 = 262144；只取低 18 位，超出部分视为多圈/无效高位丢弃，
- *        因此结果恒在 0~359999，不会出现 360.000。
- */
-uint32_t fpga_angle_to_mdeg18(uint32_t raw)
-{
-    uint32_t cnt = raw & 0x3FFFFu;
-
-    return (uint32_t)(((uint64_t)cnt * 360000u + 131072u) / 262144u);
-}
-
-/**
  * @brief 角度码值 -> 千分之一度（实测校准口径）
  * @note  raw = FPGA_ANGLE_BASE + 角度 x 8192，一圈跨越 FPGA_ANGLE_SPAN。
  *        先扣偏置再按 span 取模，结果恒在 0~359999。
