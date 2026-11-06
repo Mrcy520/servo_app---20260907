@@ -94,6 +94,10 @@ extern volatile uint32_t g_fpga_rej_us_max;
  * 数据已被纠正、可正常使用，但这个相位本身应由 FPGA 侧修掉。 */
 extern volatile uint32_t g_fpga_nib_swap;
 
+/* 位相位判定次数。上电后应很快稳定为 1 次；
+ * 若持续增长，说明 FPGA 的 MISO 位相位在反复变化（该查 FPGA 侧）。 */
+extern volatile uint32_t g_fpga_phase_cnt;
+
 /* 同步沿间隔直方图：6 档，单位 µs
  *   [0] <20  [1] 20~40  [2] 40~56  [3] 56~72  [4] 72~88  [5] >=88
  * 取走后清零，因此每次得到的都是"上一个统计窗口"的分布。

@@ -193,3 +193,18 @@ uint32_t fpga_vbus_to_mv(uint16_t raw);
 #endif
 
 #endif /* __FPGA_PROTO_H */
+
+/* ===== 位相位纠正（2026-11-06 新增）=====
+ * 实测该 FPGA 的 MISO 起始位相位在不同上电周期里会变，同一周期内稳定。已见三种：
+ *   0 bit  正常                        —— [WIN] AA 55 01 04 40 8B …
+ *   1 bit  整帧左移一位（每字节 = (true<<1)|(next>>7)）
+ *          —— [WIN] 55 AA 06 0A 02 02 …（= AA 55 03 05 01 01 … 左移 1 位，21/24 字节逐字节吻合）
+ *   4 bit  每字节高低半字节互换（0x30 = 0x03<<4）
+ * 因此提供"按 k 位右移还原"（还原 1 bit 相位）与"逐字节半字节互换"两种逆变换，
+ * 以及一个按"帧头 + 状态合法"自动判定相位的函数。纯整数运算，可主机端测试。 */
+#define FPGA_PHASE_ROT 0x80u /* fpga_detect_phase 的返回值置此位 = 半字节互换(rotate)相位 */
+
+void fpga_unshift(const uint8_t* in, uint8_t k, uint8_t* out); /* k 位右移还原，k=1..7 */
+void fpga_nibble_swap(const uint8_t* in, uint8_t* out);        /* 逐字节高低半字节互换 */
+uint8_t fpga_detect_phase(const uint8_t* win); /* 0..7 或 (FPGA_PHASE_ROT|k)；0 = 原样可用 */
+void fpga_apply_phase(const uint8_t* win, uint8_t phase, uint8_t* out); /* 按相位还原成规范帧 */

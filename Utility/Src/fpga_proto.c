@@ -273,3 +273,118 @@ uint32_t fpga_vbus_to_mv(uint16_t raw)
 {
     return (uint32_t)raw * FPGA_VBUS_LSB_MV;
 }
+
+/* -------------------------------------------------------------------------- */
+/* 位相位纠正                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * @brief 把整帧按 k 位右移还原（对应"整帧左移了 k 位"的相位）
+ * @note  dst[i] = (in[i] >> k) | ((in[i-1] 的低 k 位) << (8-k))。
+ *        i=0 时的借位来源不在本窗口内（属于上一帧），置 0；
+ *        实测该字节本就不可靠（窗边界），帧头为常量，不影响判定与解析。
+ */
+void fpga_unshift(const uint8_t* in, uint8_t k, uint8_t* out)
+{
+    uint8_t i;
+    uint8_t mask;
+    uint8_t prev_lo = 0u;
+
+    if ((k == 0u) || (k > 7u)) {
+        for (i = 0u; i < (uint8_t)FPGA_FRAME_LEN; i++) {
+            out[i] = in[i];
+        }
+        return;
+    }
+
+    mask = (uint8_t)((1u << k) - 1u);
+
+    for (i = 0u; i < (uint8_t)FPGA_FRAME_LEN; i++) {
+        uint8_t b = in[i];
+
+        out[i]  = (uint8_t)((b >> k) | (uint8_t)(prev_lo << (8u - k)));
+        prev_lo = (uint8_t)(b & mask);
+    }
+}
+
+void fpga_nibble_swap(const uint8_t* in, uint8_t* out)
+{
+    uint8_t i;
+
+    for (i = 0u; i < (uint8_t)FPGA_FRAME_LEN; i++) {
+        out[i] = (uint8_t)((in[i] >> 4) | (uint8_t)(in[i] << 4));
+    }
+}
+
+/**
+ * @brief 判定一个 32 字节窗口处于哪种相位
+ * @retval 0 = 原样即可；1..7 = 需要按该位数右移；FPGA_PHASE_ROT|k = 需先右移再半字节互换；
+ *         0xFF = 都试过不合法
+ */
+uint8_t fpga_detect_phase(const uint8_t* win)
+{
+    uint8_t buf[FPGA_FRAME_LEN];
+    uint8_t swp[FPGA_FRAME_LEN];
+    uint8_t k;
+
+    for (k = 0u; k <= 7u; k++) {
+        fpga_unshift(win, k, buf);
+
+        if (k == 0u) {
+            /* 无位移：帧头必须逐字节精确匹配 */
+            if ((buf[0] == FPGA_HDR_RX0) && (buf[1] == FPGA_HDR_RX1) &&
+                (FPGA_ST_IS_VALID(buf[2]) != 0u)) {
+                return 0u;
+            }
+            fpga_nibble_swap(buf, swp);
+            if ((swp[0] == FPGA_HDR_RX0) && (swp[1] == FPGA_HDR_RX1) &&
+                (FPGA_ST_IS_VALID(swp[2]) != 0u)) {
+                return (uint8_t)(FPGA_PHASE_ROT | 0u);
+            }
+            continue;
+        }
+
+        /* k>=1：第 0 字节的借位来自窗口外，第 1 字节最高位又依赖它，故这两位不可靠；
+         * 第 2 字节起完全正确。用"第 1 字节低 7 位 == 0x55"+"状态合法"判定。 */
+        if (((buf[1] & 0x7Fu) == 0x55u) && (FPGA_ST_IS_VALID(buf[2]) != 0u)) {
+            return k;
+        }
+        fpga_nibble_swap(buf, swp);
+        if (((swp[1] & 0x7Fu) == 0x55u) && (FPGA_ST_IS_VALID(swp[2]) != 0u)) {
+            return (uint8_t)(FPGA_PHASE_ROT | k);
+        }
+    }
+
+    return 0xFFu;
+}
+
+/**
+ * @brief 按判定的相位把一个窗口还原成规范帧
+ * @note  位移相位下第 0/1 字节不可恢复（借位在窗口外），但它们是固定的帧头常量
+ *        AA 55，且相位已由状态字节验证，因此这里直接补上——否则 unpack 的帧头检查会拒收。
+ */
+void fpga_apply_phase(const uint8_t* win, uint8_t phase, uint8_t* out)
+{
+    uint8_t k = (uint8_t)(phase & 0x7Fu);
+
+    fpga_unshift(win, k, out);
+
+    if (k != 0u) {
+        out[0] = FPGA_HDR_RX0;
+        out[1] = FPGA_HDR_RX1;
+    }
+
+    if ((phase & FPGA_PHASE_ROT) != 0u) {
+        uint8_t tmp[FPGA_FRAME_LEN];
+        uint8_t i;
+
+        for (i = 0u; i < (uint8_t)FPGA_FRAME_LEN; i++) {
+            tmp[i] = out[i];
+        }
+        fpga_nibble_swap(tmp, out);
+        if (k != 0u) {
+            out[0] = FPGA_HDR_RX0;
+            out[1] = FPGA_HDR_RX1;
+        }
+    }
+}

@@ -45,6 +45,14 @@ static uint8_t s_raw_frame[FPGA_FRAME_LEN];
 static uint8_t s_last_win[FPGA_FRAME_LEN];
 static volatile uint8_t s_last_win_valid;
 
+/* 位相位缓存：实测该 FPGA 的 MISO 起始位相位在不同上电周期里会变（见过 0/1/4 位），
+ * 但在一个上电周期内稳定。因此"检测一次 + 缓存"，而不是每帧穷举。
+ * 检测只在窗口里找不到帧头时做一次，且必须通过帧头/状态校验才采用，
+ * 所以正常相位（0）下这条路径永远不会被激活。 */
+static uint8_t  s_phase;      /* 0 = 原样；其余见 fpga_detect_phase 的返回值 */
+static uint8_t  s_phase_lock;
+static uint16_t s_phase_fail; /* 锁定后连续失败计数，超限则重新检测 */
+
 /* 滑窗重同步缓冲：s_rd..s_wr 为尚未消费的字节 */
 static uint8_t s_stream[FPGA_FRAME_LEN * 2u];
 static uint8_t s_rd;
@@ -95,6 +103,9 @@ volatile uint32_t g_fpga_rej_us_max;
 /* nibble 交换纠正次数。正常应恒为 0；若持续增长，说明该 FPGA 这一次上电
  * 就工作在"半字节互换"相位——数据仍是可用的（已纠正），但值得反馈给 FPGA 侧。 */
 volatile uint32_t g_fpga_nib_swap;
+
+/* 位相位判定/变更次数（每次确定一个相位 +1）。正常应在上电后很快稳定为 1 次。 */
+volatile uint32_t g_fpga_phase_cnt;
 
 /* 同步沿间隔直方图（每 5 s 由诊断层取走并清零）。
  * 稳态 16 kHz = 62.5 µs，样本应几乎全部落在 56~72 这一档。
@@ -150,6 +161,10 @@ static void FpgaLink_RecoverSpi(void);
  * ovr 每秒 +16000），现场只能靠复位恢复。 */
 #define FPGA_LINK_STUCK_US 500u
 
+/* 锁定相位后，连续多少帧找不到帧头才重新判定相位（FPGA 重新上电可能换相位）。
+ * 取 64 ≈ 4 ms，足够区分"偶发错帧"与"相位真的变了"。 */
+#define FPGA_LINK_PHASE_RETRY 64u
+
 /* -------------------------------------------------------------------------- */
 /* 初始化                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -192,6 +207,10 @@ void FpgaLink_Init(void)
     g_fpga_rej_us_min  = 0xFFFFFFFFu;
     g_fpga_rej_us_max  = 0u;
     g_fpga_nib_swap    = 0u;
+    s_phase            = 0u;
+    s_phase_lock       = 0u;
+    s_phase_fail       = 0u;
+    g_fpga_phase_cnt   = 0u;
     (void)memset((void*)s_sync_hist, 0, sizeof(s_sync_hist));
     g_fpga_recover    = 0u;
     g_fpga_err_detail = 0u;
@@ -455,13 +474,21 @@ static void FpgaLink_StartExchange(void)
  * @brief 把一个 32 字节接收窗口并入字节流并尝试解出完整帧
  * @note  运行于 DMA 完成中断
  */
-static void FpgaLink_RxWindow(const uint8_t* win)
+static void FpgaLink_RxWindow(const uint8_t* win_in)
 {
+    uint8_t  fixed[FPGA_FRAME_LEN];
+    const uint8_t* win = win_in;
     uint16_t i;
 
-    /* 先留原始窗口：解不出帧时它是唯一的现场证据 */
-    (void)memcpy(s_last_win, win, FPGA_FRAME_LEN);
+    /* 先留**原始**窗口：解不出帧时它是唯一的现场证据（必须是线上字节，不能是还原后的） */
+    (void)memcpy(s_last_win, win_in, FPGA_FRAME_LEN);
     s_last_win_valid = 1u;
+
+    /* 已锁定非零相位：先还原成规范帧再走原有流程 */
+    if (s_phase != 0u) {
+        fpga_apply_phase(win_in, s_phase, fixed);
+        win = fixed;
+    }
 
     /* 缓冲回绕时先搬移未消费字节 */
     if (((uint16_t)s_wr + (uint16_t)FPGA_FRAME_LEN) > (uint16_t)sizeof(s_stream)) {
@@ -505,6 +532,22 @@ static void FpgaLink_RxWindow(const uint8_t* win)
             s_rd = (uint8_t)(s_wr - 1u);
             g_fpga_err++;
             g_fpga_slip++;
+
+            /* 位相位自愈：找不到帧头时判一次相位。判定必须通过"帧头/状态"校验，
+             * 校验不过就保持原样（0xFF），因此不会把好的相位改坏。
+             * 相位一旦确定就锁定，只在连续失败过多（例如 FPGA 重新上电换了相位）时重判。 */
+            if (++s_phase_fail >= FPGA_LINK_PHASE_RETRY) {
+                uint8_t ph = fpga_detect_phase(s_last_win);
+
+                s_phase_fail = 0u;
+                if (ph != 0xFFu) {
+                    if ((ph != s_phase) || (s_phase_lock == 0u)) {
+                        g_fpga_phase_cnt++;
+                    }
+                    s_phase      = ph;
+                    s_phase_lock = 1u;
+                }
+            }
             break;
         }
 
