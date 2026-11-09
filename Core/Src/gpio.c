@@ -65,9 +65,10 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(nInt_GPIO_Port, &GPIO_InitStruct);
 
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 2, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+  /* EXTI interrupt init:
+   * 移至 FpgaLink_Init() 中在外设与缓冲完全就绪后再使能，避免开机未就绪时误触发中断 */
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  /* HAL_NVIC_EnableIRQ(EXTI15_10_IRQn); */
 
 }
 

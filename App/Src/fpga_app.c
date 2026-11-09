@@ -163,8 +163,8 @@ static void FpgaApp_ConsumeRx(void)
     if (fpga_angle_in_range(rx.angle_raw) == 0u) {
         g_fpga_angle_over++;
     }
-    // TODO: 以当前解析口径为准
-    // g_status.angle = fpga_angle_to_ctrl24(rx.angle_raw);
+    /* 角度换算：对外统一按控制协议标准满量程（360/2^24°）上报。
+     * 当前编码器硬件仅输出后 1/4 圈（对应 270°~360°），上位机将其映射为 0°~360° 用于调试 */
     g_status.angle = fpga_angle_to_mdeg_cal(rx.angle_raw);
 
     g_status.iq = fpga_i_raw_to_ctrl16(rx.iq_raw);
@@ -172,9 +172,10 @@ static void FpgaApp_ConsumeRx(void)
     /* 编码器故障字：
      *   ① 源位跟随电平——bit0 必须反映"当前是否报警"，否则主控清一次锁存后
      *      会在编码器仍故障时收到 st=0x00，属于状态位撒谎；
-     *   ② bit7 锁存与强制关输出只在 0→非零 的上升沿做一次，避免故障持续时每帧重锁。 */
+     *   ② bit7 锁存与强制关输出在 0→非零 上升沿触发，若底层故障未消解则持续保持锁存。 */
     CommApp_SetFaultLevel(ST_ANGLE_ERR, (rx.enc_fault != 0u) ? 1u : 0u);
-    if ((rx.enc_fault != 0u) && (s_enc_fault_prev == 0u)) {
+    if ((rx.enc_fault != 0u) &&
+        ((s_enc_fault_prev == 0u) || ((g_status.status & ST_FAULT_LATCH) == 0u))) {
         CommApp_SetFault(ST_ANGLE_ERR);
     }
     s_enc_fault_prev = rx.enc_fault;

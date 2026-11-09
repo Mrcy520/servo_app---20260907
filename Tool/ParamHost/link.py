@@ -194,7 +194,7 @@ class SerialLink(object):
                 return
             head = buf[0]
             if head == P.CTRL_HEAD:
-                # 帧头 AA，第二字节为 ID 码（0x54 + 站号）
+                # 帧头 AA，第二字节为固定 ID 码（0x55）
                 if len(buf) < P.CTRL_UP_LEN:
                     return
                 frame = bytes(buf[:P.CTRL_UP_LEN])

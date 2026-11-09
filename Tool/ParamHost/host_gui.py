@@ -836,9 +836,10 @@ class HostApp(object):
                         lb.configure(bg="#B00020", fg="#FFFFFF")
                     else:
                         lb.configure(bg="#D98800", fg="#FFFFFF")
+                ang_map = f.get("angle_deg_map", f.get("angle_deg_cal", 0.0))
+                ang_full = f.get("angle_deg_full", 0.0)
                 self.lb_vals["angle"].configure(
-                    text="%.2f° (%.2f%%)" % (f["angle"] * P.CTRL_ANG_LSB,
-                                             f["angle"] * 100.0 / 16777216.0))
+                    text="%.2f° [原始: %.2f°]" % (ang_map, ang_full))
                 self.lb_vals["iq"].configure(text="%.2f A" % (f["iq"] * P.CTRL_IQ_LSB))
                 self.lb_vals["vbus"].configure(text="%.1f V" % (f["vbus"] * P.CTRL_VBUS_LSB))
                 self.lb_vals["age"].configure(

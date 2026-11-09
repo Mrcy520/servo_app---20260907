@@ -34,14 +34,18 @@ extern "C" {
 
 extern UART_HandleTypeDef huart1;
 
+#if 0 /* 串口2已关闭 */
 extern UART_HandleTypeDef huart2;
+#endif
 
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
 
 void MX_USART1_UART_Init(void);
+#if 0 /* 串口2已关闭 */
 void MX_USART2_UART_Init(void);
+#endif
 
 /* USER CODE BEGIN Prototypes */
 

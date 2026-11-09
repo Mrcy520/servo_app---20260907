@@ -20,6 +20,7 @@
 #include "comm_app.h"
 #include "dbg_report.h" /* 调试上报（COMM_DEBUG_REPORT=0 时全部编译为空） */
 #include "nvm.h"        /* 内部 Flash 掉电保存 */
+#include "fpga_link.h"  /* FPGA 链路（Flash 擦写时 Pause/Resume） */
 #include <string.h>
 
 /* 掉电保存的参数范围：参数协议表 3-1 中所有"读写"项 0x01~0x0B ------------
@@ -196,8 +197,8 @@ uint8_t CommApp_OnControlFrame(const ctrl_down_t* c)
         return 1u;
     }
 
-    /* 7) 使能门控：故障锁存期间不接受使能，须先由主控下发 bit1 清故障 */
-    enable = (uint8_t)(((ctrl & CW_ENABLE) != 0u) && ((g_status.status & ST_FAULT_LATCH) == 0u));
+    /* 7) 使能门控：故障锁存或当前存在硬件故障时不接受使能，须先清故障且底层正常 */
+    enable = (uint8_t)(((ctrl & CW_ENABLE) != 0u) && ((g_status.status & (ST_FAULT_LATCH | ST_FAULT_MASK)) == 0u));
     if (enable != 0u) {
         g_control.ctrl |= CW_ENABLE;
         g_status.status |= ST_ENABLED;
@@ -516,12 +517,20 @@ static void CommApp_NvmService(void)
 
     s_nvm_tick = now;
 
-    if (Nvm_Save(buf, PARAM_STORE_LEN) != 0u) {
-        (void)memcpy(s_nvm_snap, buf, PARAM_STORE_LEN);
-        s_nvm_dirty = 0u;
-        Dbg_OnEvent("NVM SAVE OK");
-    } else {
-        Dbg_OnEvent("NVM SAVE FAIL");
+    /* Flash 擦写（20~40 ms）期间 CPU 总线 Stall，必须暂停 16 kHz EXTI 中断，
+     * 避免总线恢复后被判定超时卡死并误复位外设 */
+    FpgaLink_Pause();
+    {
+        uint8_t nvm_ok = Nvm_Save(buf, PARAM_STORE_LEN);
+        FpgaLink_Resume();
+
+        if (nvm_ok != 0u) {
+            (void)memcpy(s_nvm_snap, buf, PARAM_STORE_LEN);
+            s_nvm_dirty = 0u;
+            Dbg_OnEvent("NVM SAVE OK");
+        } else {
+            Dbg_OnEvent("NVM SAVE FAIL");
+        }
     }
 
     /* 擦写期间主循环停摆 20~40 ms，接收环形缓冲已绕回、旧数据被覆盖，

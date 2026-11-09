@@ -77,7 +77,7 @@ QLineEdit {
 QLineEdit:focus { border-bottom:2px solid #0067C0; background:#FFFFFF; }
 QLineEdit[modified="true"] { border-bottom:2px solid #E9A700; background:#FFFDF5; }
 QLineEdit[invalid="true"]  { border-bottom:2px solid #C42B1C; background:#FFF6F5; }
-QLineEdit[ro="true"] { background:#F7F7F7; color:#9A9A9A; border-bottom:1px solid #DCDCDC; }
+QLineEdit[ro="true"] { background:#F7F7F7; color:#666666; border-bottom:1px solid #DCDCDC; }
 """
 
 
@@ -438,7 +438,7 @@ class StripChart(QWidget):
             ts, s1, s2 = self.t, self.s1, self.s2
 
         n = len(ts)
-        p.setPen(QColor("#9A9A9A"))
+        p.setPen(QColor("#666666"))
         p.setFont(QFont(F.FONT_MONO, 7))
         if n < 2:
             p.drawText(self.rect().adjusted(44, 0, 0, 0), Qt.AlignCenter, "等待数据…")
@@ -462,7 +462,7 @@ class StripChart(QWidget):
             p.setPen(QPen(QColor("#ECECEC"), 1))
             p.drawLine(QPointF(x, 6), QPointF(x, h - 18))
             if self._wall0 is not None:
-                p.setPen(QColor("#9A9A9A"))
+                p.setPen(QColor("#666666"))
                 p.drawText(QRectF(x - 46, h - 16, 92, 12), Qt.AlignCenter,
                            time.strftime("%H:%M:%S", time.localtime(self._wall0 + tick)))
             tick += step
@@ -498,7 +498,7 @@ class StripChart(QWidget):
             p.drawPath(path)
 
         # ---- Y 轴：精度随缩放自适应（平线也能看出量级） ----
-        p.setPen(QColor("#9A9A9A"))
+        p.setPen(QColor("#666666"))
         deg_rng = (hi - lo) * 360.0
         fmt = "%.0f°" if deg_rng >= 10 else ("%.1f°" if deg_rng >= 1 else "%.2f°")
         p.drawText(QRectF(0, 0, 40, 14), Qt.AlignRight | Qt.AlignVCenter, fmt % (hi * 360.0))
@@ -708,7 +708,6 @@ class MainWindow(_ShellBase):
         self.lb_stat.setFont(QFont(F.FONT_MONO, 8))
         cl.addLayout(row(self.lb_stat, None))
         v.addWidget(conn)
-
         act = QHBoxLayout()
         act.setSpacing(8)
         self.pend_pill = pill("待锁存 0 项")
@@ -794,6 +793,16 @@ class MainWindow(_ShellBase):
         v.addWidget(lgc)
         return w
 
+    def _toggle_angle_mode(self, event=None):
+        self.angle_use_cal = not getattr(self, "angle_use_cal", True)
+        if hasattr(self, "lb_ang_mode"):
+            if self.angle_use_cal:
+                self.lb_ang_mode.setText("[映射 0~360°]")
+                self.lb_ang_mode.setStyleSheet("color:#0078D4;font-size:8pt;font-weight:600;")
+            else:
+                self.lb_ang_mode.setText("[原始 270~360°]")
+                self.lb_ang_mode.setStyleSheet("color:#D83B01;font-size:8pt;font-weight:600;")
+
     # ================================================================ 页 2
     def _build_monitor_page(self):
         w = QWidget()
@@ -807,6 +816,7 @@ class MainWindow(_ShellBase):
         g.setContentsMargins(0, 0, 0, 0)
         g.setSpacing(10)
         self.metrics = {}
+        self.angle_use_cal = True
         for cap_text, unit, attr in (("电角度", "°", "angle"), ("Iq 电流", "A", "iq"),
                                      ("母线电压", "V", "vbus"), ("转速估算", "rpm", "rpm")):
             c, lay = card()
@@ -823,6 +833,12 @@ class MainWindow(_ShellBase):
             h.addWidget(u)
             h.addStretch(1)
             lay.addLayout(h)
+            if attr == "angle":
+                self.lb_ang_mode = QLabel("[映射 0~360°]")
+                self.lb_ang_mode.setStyleSheet("color:#0078D4;font-size:8pt;font-weight:600;")
+                self.lb_ang_mode.setToolTip("点击切换口径：调试映射(后1/4段270~360°映射到0~360°) / 原始满量程(270~360°)")
+                self.lb_ang_mode.mousePressEvent = self._toggle_angle_mode
+                lay.addWidget(self.lb_ang_mode)
             self.metrics[attr] = lb
             g.addWidget(c, 1)
 
@@ -838,7 +854,7 @@ class MainWindow(_ShellBase):
         self.dot_fault = QLabel("● 无故障")
         self.dot_link = QLabel("● 链路 —")
         for d in (self.dot_en, self.dot_fault, self.dot_link):
-            d.setStyleSheet("color:#B9B9B9;font-size:9pt;font-weight:600;")
+            d.setStyleSheet("color:#8A8A8A;font-size:9pt;font-weight:600;")
             self.dots_lay.addWidget(d)
         self.dots_lay.addStretch(1)
         st_lay.addLayout(self.dots_lay)
@@ -1027,7 +1043,7 @@ class MainWindow(_ShellBase):
         for bit, short, desc in P.STATUS_BITS:
             lb = QLabel("0x%02X %s %s" % (bit, short, desc))
             lb.setToolTip(desc)
-            lb.setStyleSheet("background:#EDEDED;color:#8C8C8C;border-radius:4px;"
+            lb.setStyleSheet("background:#EDEDED;color:#666666;border-radius:4px;"
                              "padding:4px 9px;font-size:8pt;")
             self.chips[bit] = lb
             chips.addWidget(lb)
@@ -1287,7 +1303,7 @@ class MainWindow(_ShellBase):
     def _log(self, msg, level="info", page="both"):
         color = LOG_COLORS.get(level, LOG_COLORS["info"])
         ts = time.strftime("%H:%M:%S")
-        html_line = ('<span style="color:#9A9A9A">[%s]</span> '
+        html_line = ('<span style="color:#666666">[%s]</span> '
                      '<span style="color:%s">%s</span>' % (ts, color, html.escape(msg)))
         targets = []
         if page in ("both", "param"):
@@ -1769,7 +1785,7 @@ class MainWindow(_ShellBase):
         ctl_visible = self.page_control.isVisible()
 
         if f is not None:
-            ang_deg = f["angle"] * P.CTRL_ANG_LSB
+            ang_deg = f.get("angle_deg_map" if self.angle_use_cal else "angle_deg_full", f.get("angle_deg_cal", f["angle_deg"]))
             iq_a = f["iq"] * P.CTRL_IQ_LSB
             if mon_visible:
                 self.metrics["angle"].setText("%.2f" % ang_deg)
@@ -1798,7 +1814,7 @@ class MainWindow(_ShellBase):
                     on = bool(f["status"] & bit)
                     lb = self.chips[bit]
                     if not on:
-                        lb.setStyleSheet("background:#EDEDED;color:#8C8C8C;border-radius:4px;"
+                        lb.setStyleSheet("background:#EDEDED;color:#666666;border-radius:4px;"
                                          "padding:4px 9px;font-size:8pt;")
                     elif bit == P.ST_ENABLED:
                         lb.setStyleSheet("background:%s;color:#FFF;border-radius:4px;"
@@ -1830,7 +1846,7 @@ class MainWindow(_ShellBase):
                 # 圆点只改文字与配色，控件不销毁重建（旧实现每 50 ms 重建 3 个 QLabel）
                 self.dot_en.setText("● 使能" if f["status"] & P.ST_ENABLED else "● 停止")
                 self.dot_en.setStyleSheet("color:%s;font-size:9pt;font-weight:600;"
-                                          % (F.OK_GREEN if f["status"] & P.ST_ENABLED else "#B9B9B9"))
+                                          % (F.OK_GREEN if f["status"] & P.ST_ENABLED else "#8A8A8A"))
                 self.dot_fault.setText("● 无故障" if not faults else "● " + "、".join(faults))
                 self.dot_fault.setStyleSheet("color:%s;font-size:9pt;font-weight:600;"
                                              % (F.OK_GREEN if not faults else F.ERR_RED))

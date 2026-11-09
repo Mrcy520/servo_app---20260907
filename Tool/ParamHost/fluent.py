@@ -22,10 +22,10 @@ ACCENT_HOVER = "#1975C5"
 ACCENT_PRESS = "#005BA1"
 CANVAS = "#F3F3F3"
 CARD_BG = "#FFFFFF"
-BORDER = "#E5E5E5"
+BORDER = "#CFCFCF"
 TEXT = "#1A1A1A"
-TEXT_2 = "#5D5D5D"
-TEXT_3 = "#8C8C8C"
+TEXT_2 = "#444444"
+TEXT_3 = "#666666"
 OK_GREEN = "#0F7B0F"
 WARN_AMBER = "#C87A00"
 ERR_RED = "#C42B1C"
@@ -154,6 +154,15 @@ except Exception as _exc:
         pass
 
 
+
+# 卡片统一用不透明 QFrame：Fluent 的 CardWidget 底色为半透明白，悬停时 alpha 反而降低，
+# 嵌套/换电脑后会与背景色趋同；此处覆盖为恒定不透明底色 + 清晰描边，无悬停变化。
+class CardWidget(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Card")
+
+
 # ---- 全局 QSS（降级路径与通用精修都用它，Fluent 库存在时只做少量覆盖）------
 STYLE = """
 QWidget {
@@ -209,7 +218,7 @@ QPushButton {
 }
 QPushButton:hover  { background: #F5F5F5; }
 QPushButton:pressed{ background: #EDEDED; }
-QPushButton:disabled { color: #A0A0A0; background: #F7F7F7; border-color: #E8E8E8; }
+QPushButton:disabled { color: #767676; background: #F7F7F7; border-color: #E8E8E8; }
 QPushButton#Primary {
     background: %(accent)s;
     color: #FFFFFF;
@@ -270,6 +279,11 @@ QScrollBar::handle:horizontal { background: #C9C9C9; border-radius: 4px; min-wid
 # Fluent 库存在时只补窗口底色、标题与等宽数值字体，避免全局 QSS 破坏其自绘外观
 STYLE_MIN = """
 QWidget#Root { background: %(canvas)s; }
+QFrame#Card {
+    background: %(card)s;
+    border: 1px solid %(border)s;
+    border-radius: 8px;
+}
 QLabel#SectionTitle { font-size: 10pt; font-weight: 600; color: %(text)s; }
 QLabel#Caption { color: %(text3)s; font-size: 8pt; }
 QLabel#Metric { font-family: "%(mono)s"; font-size: 10pt; color: %(text)s; }
@@ -284,7 +298,7 @@ QTextBrowser {
 QSplitter::handle { background: transparent; }
 """ % {
     "text": TEXT, "text2": TEXT_2, "text3": TEXT_3,
-    "canvas": CANVAS, "border": BORDER, "mono": FONT_MONO,
+    "canvas": CANVAS, "card": CARD_BG, "border": BORDER, "mono": FONT_MONO,
 }
 
 
@@ -335,7 +349,7 @@ def chip(text, tooltip=""):
     lb.setMinimumWidth(52)
     lb.setFixedHeight(22)
     lb.setStyleSheet(
-        "background:#EDEDED; color:#8C8C8C; border-radius:11px;"
+        "background:#EDEDED; color:#666666; border-radius:11px;"
         "font-family:'%s'; font-size:8pt; font-weight:600; padding:0 8px;" % FONT_MONO)
     return lb
 
@@ -343,7 +357,7 @@ def chip(text, tooltip=""):
 def set_chip(lb, active, kind="fault"):
     if not active:
         lb.setStyleSheet(
-            "background:#EDEDED; color:#8C8C8C; border-radius:11px;"
+            "background:#EDEDED; color:#666666; border-radius:11px;"
             "font-family:'%s'; font-size:8pt; font-weight:600; padding:0 8px;" % FONT_MONO)
         return
     bg = {"en": OK_GREEN, "fault": ERR_RED, "warn": WARN_AMBER}.get(kind, WARN_AMBER)
@@ -399,7 +413,7 @@ QSpinBox:focus, QDoubleSpinBox:focus {
     background: #FFFFFF;
     border-bottom: 2px solid %(accent)s;
 }
-QSpinBox:disabled, QDoubleSpinBox:disabled { color: #A8A8A8; background: #F4F4F4; }
+QSpinBox:disabled, QDoubleSpinBox:disabled { color: #767676; background: #F4F4F4; }
 QSpinBox::up-button, QDoubleSpinBox::up-button {
     subcontrol-origin: border;
     subcontrol-position: top right;

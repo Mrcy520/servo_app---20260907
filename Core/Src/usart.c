@@ -25,11 +25,13 @@
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart1;
-UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart1_rx;
 DMA_HandleTypeDef hdma_usart1_tx;
+#if 0 /* 串口2已关闭 */
+UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_rx;
 DMA_HandleTypeDef hdma_usart2_tx;
+#endif
 
 /* USART1 init function */
 
@@ -64,6 +66,7 @@ void MX_USART1_UART_Init(void)
   /* USER CODE END USART1_Init 2 */
 
 }
+#if 0 /* 串口2已关闭 */
 /* USART2 init function */
 
 void MX_USART2_UART_Init(void)
@@ -97,6 +100,7 @@ void MX_USART2_UART_Init(void)
   /* USER CODE END USART2_Init 2 */
 
 }
+#endif
 
 void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
 {
@@ -162,6 +166,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
 
   /* USER CODE END USART1_MspInit 1 */
   }
+#if 0 /* 串口2已关闭 */
   else if(uartHandle->Instance==USART2)
   {
   /* USER CODE BEGIN USART2_MspInit 0 */
@@ -222,6 +227,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
 
   /* USER CODE END USART2_MspInit 1 */
   }
+#endif
 }
 
 void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
@@ -251,6 +257,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
   /* USER CODE END USART1_MspDeInit 1 */
   }
+#if 0 /* 串口2已关闭 */
   else if(uartHandle->Instance==USART2)
   {
   /* USER CODE BEGIN USART2_MspDeInit 0 */
@@ -275,6 +282,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
   /* USER CODE END USART2_MspDeInit 1 */
   }
+#endif
 }
 
 /* USER CODE BEGIN 1 */

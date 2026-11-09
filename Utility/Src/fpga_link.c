@@ -314,8 +314,9 @@ void FpgaLink_Init(void)
     fpga_pack_cmd(s_tx_buf[0], &idle);
     fpga_pack_cmd(s_tx_buf[1], &idle);
 
-    /* 注意：EXTERNAL 中断（PA11 = nInt_Pin，下降沿）由 MX_GPIO_Init 配置，
-     * 此处不重复配置，避免与 CubeMX 生成的 GPIO 初始化冲突。 */
+    /* 安全使能：清除残留下降沿标志，开启同步中断（避免在外设未初始化前响应中断） */
+    __HAL_GPIO_EXTI_CLEAR_IT(nInt_Pin);
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -877,4 +878,30 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef* hspi)
 
     g_fpga_err++;
     __HAL_SPI_CLEAR_OVRFLAG(hspi);
+}
+
+void FpgaLink_Pause(void)
+{
+    uint32_t timeout = 50000u;
+
+    HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
+
+    /* 若恰好有一笔 DMA 正在传输，等待其完成（最多 ~30 µs） */
+    while ((hspi3.State != HAL_SPI_STATE_READY) && (timeout > 0u)) {
+        timeout--;
+    }
+}
+
+void FpgaLink_Resume(void)
+{
+    /* 清除暂停期间可能锁存的边沿，避免恢复后立即触发陈旧中断 */
+    __HAL_GPIO_EXTI_CLEAR_IT(nInt_Pin);
+
+    /* 时间戳基准复位，避免将暂停时间误判为卡死或超大 sync 抖动 */
+    if (s_dwt_ok != 0u) {
+        s_ts_prev_edge = 0u;
+        s_ts_start     = DWT->CYCCNT;
+    }
+
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }

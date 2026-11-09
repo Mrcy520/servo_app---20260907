@@ -30,8 +30,7 @@ extern "C" {
 #include <string.h>
 
 /* ===== 驱动器编号 ========================================================= */
-/* 控制链路的 ID 码（0x54 + 编号）与参数链路的设备地址（1 ~ 247）共用同一编号，
- * 避免两套链路站号不一致。需要改站号时只改这一处（或用 -D 覆盖）。 */
+/* 参数链路的设备地址（1 ~ 247），控制链路 ID 码已按协议固定为 0x55 */
 #ifndef COMM_DEV_ADDR
 #define COMM_DEV_ADDR 1u
 #endif
@@ -44,8 +43,8 @@ extern "C" {
 #define CTRL_UP_LEN   10u
 #define CTRL_DOWN_LEN 10u
 #define CTRL_HEAD     0xAAu
-#define CTRL_ID_BASE  0x54u /* ID 码 = 0x54 + 驱动器编号 */
-#define CTRL_ID       (CTRL_ID_BASE + COMM_DEV_ADDR)
+#define CTRL_ID       0x55u /* 固定控制链路 ID 码为 0x55（与驱动器编号解耦，见控制协议表 2-1/3-1） */
+#define CTRL_ID_BASE  0x55u /* 兼容旧宏定义 */
 
 /* 上行状态位 */
 #define ST_ANGLE_ERR   0x01u /* 角度传感器报警 */

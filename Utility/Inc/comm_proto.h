@@ -27,7 +27,7 @@ extern "C" {
 #include <stdint.h>
 #include "proto.h"
 
-/* 本机站号：与控制链路 ID 码共用同一编号（见 proto.h 的 COMM_DEV_ADDR）---- */
+/* 本机站号：供参数链路设备地址使用（见 proto.h 的 COMM_DEV_ADDR）---- */
 #ifndef COMM_PROTO_ADDR
 #define COMM_PROTO_ADDR COMM_DEV_ADDR
 #endif

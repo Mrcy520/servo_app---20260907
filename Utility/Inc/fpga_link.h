@@ -153,6 +153,10 @@ uint8_t FpgaLink_GetLastTx(uint8_t* out);
 /* 链路是否存活：有新帧且未超时 */
 uint8_t FpgaLink_Alive(void);
 
+/* 暂停/恢复 16 kHz 交互（用于 Flash 擦写等严重挂起总线的阻塞操作） */
+void FpgaLink_Pause(void);
+void FpgaLink_Resume(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -46,7 +46,8 @@ STATUS_NAME = {
 CTRL_UP_LEN = 10
 CTRL_DOWN_LEN = 10
 CTRL_HEAD = 0xAA
-CTRL_ID_BASE = 0x54
+CTRL_ID = 0x55               # 固定控制链路 ID 码为 0x55（不随驱动器编号变化）
+CTRL_ID_BASE = 0x55          # 兼容旧常量定义
 
 # 上行状态位
 ST_ANGLE_ERR = 0x01
@@ -86,7 +87,42 @@ CTRL_REF_PER_PCT = 327.67
 # 上行量纲
 CTRL_IQ_LSB = 0.01           # A/LSB
 CTRL_VBUS_LSB = 0.5          # V/LSB
-CTRL_ANG_LSB = 360.0 / 16777216.0
+
+# 角度量纲口径：
+# 1) 满量程标准口径（后续量产使用）：24 位无符号，满圈 2^24 counts（1 LSB = 360 / 2^24°）
+CTRL_ANG_LSB_FULL = 360.0 / 16777216.0
+
+# 2) 当前调试映射口径：
+#    当前编码器硬件只能读取到后 1/4 段原始数据（对应 270°~360°），但实际物理机械是一圈数据。
+#    上位机将 270°~360° 线性映射放大 4 倍至 0°~360°，供当前调试使用。
+CTRL_ANG_USE_MAP = True
+CTRL_ANG_USE_CAL = CTRL_ANG_USE_MAP  # 别名兼容
+CTRL_ANG_LSB_CAL = CTRL_ANG_LSB_FULL * 4.0
+CTRL_ANG_LSB = CTRL_ANG_LSB_FULL
+
+
+def map_angle_270_360_to_0_360(deg):
+    """将 270°~360°（后 1/4 圈）线性映射到 0°~360°（满圈）。"""
+    d = (deg - 270.0) % 360.0
+    if d < 0:
+        d += 360.0
+    if d > 90.0:
+        d = d % 90.0
+    return d * 4.0
+
+
+def parse_angle_deg(raw_angle, use_map=None, use_cal=None):
+    """换算电角度（度）。
+    use_map=True : 当前调试映射口径（将 270°~360° 线性映射到 0°~360°）
+    use_map=False: 满量程原始口径（1 LSB = 360 / 2^24°，直接显示 270°~360°）
+    use_map=None : 遵循全局 CTRL_ANG_USE_MAP
+    """
+    if use_map is None:
+        use_map = use_cal if use_cal is not None else CTRL_ANG_USE_MAP
+    deg_full = raw_angle * CTRL_ANG_LSB_FULL
+    if use_map:
+        return map_angle_270_360_to_0_360(deg_full)
+    return deg_full
 
 
 # ===== 校验与组帧 ==========================================================
@@ -108,9 +144,9 @@ def sum8(data):
     return sum(data) & 0xFF
 
 
-def ctrl_id(addr):
-    """控制链路 ID 码 = 0x54 + 站号（与参数链路地址共用同一编号）"""
-    return (CTRL_ID_BASE + addr) & 0xFF
+def ctrl_id(addr=None):
+    """控制链路 ID 码：已按最新协议固定为 0x55（与驱动器编号解耦）。"""
+    return CTRL_ID
 
 
 def pack_param(addr, cmd, idx, value=0, status=0):
@@ -167,13 +203,20 @@ def unpack_ctrl_up(frame, addr=None):
         return None
     if frame[0] != CTRL_HEAD:
         return None
-    if addr is not None and frame[1] != ctrl_id(addr):
+    if frame[1] != CTRL_ID:
         return None
     if sum8(frame[:CTRL_UP_LEN - 1]) != frame[CTRL_UP_LEN - 1]:
         return None
+    raw_ang = (frame[3] << 16) | (frame[4] << 8) | frame[5]
+    deg_full = raw_ang * CTRL_ANG_LSB_FULL
+    deg_map = map_angle_270_360_to_0_360(deg_full)
     return {
         "status": frame[2],
-        "angle": (frame[3] << 16) | (frame[4] << 8) | frame[5],
+        "angle": raw_ang,
+        "angle_deg": deg_map if CTRL_ANG_USE_MAP else deg_full,
+        "angle_deg_map": deg_map,
+        "angle_deg_cal": deg_map,   # 兼容旧键名
+        "angle_deg_full": deg_full, # 原始满量程 270°~360°
         "iq": struct.unpack(">h", bytes(frame[6:8]))[0],
         "vbus": frame[8],
     }
@@ -299,8 +342,14 @@ def selftest():
     # 控制帧：文档示例 +10% -> AA 55 01 01 0C CD 00 00 00 DA
     c = pack_ctrl_down(1, CW_ENABLE, MODE_VOLTAGE, pct_to_ref(10.0), 0)
     check(c == bytes.fromhex("AA5501010CCD000000DA"), "控制帧 = 文档示例（+10%）", c.hex(" ").upper())
-    check(ctrl_id(1) == 0x55 and ctrl_id(2) == 0x56, "ID 码 = 0x54 + 站号")
+    check(ctrl_id(1) == 0x55 and ctrl_id(2) == 0x55, "ID 码固定为 0x55")
     check(sum8(c[:9]) == c[9], "控制帧累加和自洽")
+
+    # 角度换算口径自检（270°~360° 映射到 0°~360°，12582912=270°，14680064=315°）
+    check(abs(parse_angle_deg(12582912, use_map=True) - 0.0) < 1e-4, "映射角度 270° -> 0.0°")
+    check(abs(parse_angle_deg(14680064, use_map=True) - 180.0) < 1e-4, "映射角度 315° -> 180.0°")
+    check(abs(parse_angle_deg(12582912, use_map=False) - 270.0) < 1e-4, "满量程角度 270° -> 270.0°")
+    check(abs(parse_angle_deg(8388608, use_map=False) - 180.0) < 0.01, "满量程角度半圈 -> 180.0°")
 
     # 设定值取整
     check(pct_to_ref(10.0) == 3277, "10%% -> 3277 (0x0CCD)", str(pct_to_ref(10.0)))
@@ -308,11 +357,13 @@ def selftest():
     check(pct_to_ref(0.5) == 164, "0.5%% -> 四舍五入 164", str(pct_to_ref(0.5)))
 
     # 上行帧解码：AA | ID | 状态 | 角度(3) | iq(2) | 母线 | SUM
-    up_raw = bytearray([CTRL_HEAD, ctrl_id(1), 0x00, 0x00, 0x00, 0x00, 0x0C, 0xCD, 0x10])
+    up_raw = bytearray([CTRL_HEAD, CTRL_ID, 0x00, 0x00, 0x00, 0x00, 0x0C, 0xCD, 0x10])
     up_raw.append(sum8(up_raw))
     up = unpack_ctrl_up(bytes(up_raw), addr=1)
     check(up is not None and up["iq"] == 3277 and up["vbus"] == 0x10, "上行帧解码（iq / 母线）")
-    check(unpack_ctrl_up(bytes(up_raw), addr=2) is None, "站号不符的上行帧被丢弃")
+    bad_id_raw = bytearray([CTRL_HEAD, 0x56, 0x00, 0x00, 0x00, 0x00, 0x0C, 0xCD, 0x10])
+    bad_id_raw.append(sum8(bad_id_raw))
+    check(unpack_ctrl_up(bytes(bad_id_raw), addr=1) is None, "ID 不符的上行帧被丢弃")
 
     # 参数表换算
     p4 = PARAM_BY_IDX[0x04]

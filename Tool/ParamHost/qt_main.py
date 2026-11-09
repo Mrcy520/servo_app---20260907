@@ -138,6 +138,22 @@ def main():
             F.setThemeColor(F.ACCENT)
         except Exception:
             pass
+    # 固定 Fusion + 浅色调色板：避免其他电脑的系统深色/高对比度主题让未着色控件文字发白
+    from PySide6.QtGui import QColor, QPalette
+    try:    # Qt 6.8+：显式锁定浅色方案，使系统深色模式不再影响原生对话框/标题栏
+        app.styleHints().setColorScheme(Qt.ColorScheme.Light)
+    except Exception:
+        pass
+    app.setStyle("Fusion")
+    pal = QPalette()
+    for role, col in ((QPalette.Window, "#F3F3F3"), (QPalette.WindowText, F.TEXT),
+                      (QPalette.Base, "#FFFFFF"), (QPalette.AlternateBase, "#FAFAFA"),
+                      (QPalette.Text, F.TEXT), (QPalette.Button, "#FDFDFD"),
+                      (QPalette.ButtonText, F.TEXT), (QPalette.ToolTipBase, "#FFFFFF"),
+                      (QPalette.ToolTipText, F.TEXT), (QPalette.PlaceholderText, "#666666"),
+                      (QPalette.Highlight, F.ACCENT), (QPalette.HighlightedText, "#FFFFFF")):
+        pal.setColor(role, QColor(col))
+    app.setPalette(pal)
     app.setStyleSheet(F.style_sheet())
     app.setFont(QFont(F.FONT_UI, 9))
 
